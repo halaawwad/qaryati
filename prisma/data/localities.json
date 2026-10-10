@@ -1,0 +1,1254 @@
+{
+  "dataset": "Qaryati verified Palestinian localities - enriched",
+  "version": "2.0",
+  "generatedAt": "2026-10-10",
+  "policy": {
+    "realDataOnly": true,
+    "noInventedValues": true,
+    "missingValuePolicy": "Use null or [] when a value could not be verified from a cited source.",
+    "freshnessNote": "Population values are PCBS 2021 mid-year projections. Some local-authority, facility and economy details are historical observations from ARIJ locality profiles and include asOfYear/source-year metadata; they should not be interpreted as guaranteed current 2026 status without re-verification."
+  },
+  "sources": [
+    {
+      "id": "pcbs-nablus-2021",
+      "organization": "Palestinian Central Bureau of Statistics (PCBS)",
+      "title": "Projected Mid-Year Population for Nablus Governorate by Locality 2017-2026",
+      "url": "https://microdata.pcbs.gov.ps/statisticsIndicatorsTables.aspx?lang=ar&table_id=698",
+      "sourceType": "GOVERNMENT",
+      "year": 2021
+    },
+    {
+      "id": "pcbs-ramallah-2021",
+      "organization": "Palestinian Central Bureau of Statistics (PCBS)",
+      "title": "Projected Mid-Year Population for Ramallah and Al-Bireh Governorate by Locality 2017-2026",
+      "url": "https://microdata.pcbs.gov.ps/statisticsIndicatorsTables.aspx?lang=en&table_id=701",
+      "sourceType": "GOVERNMENT",
+      "year": 2021
+    },
+    {
+      "id": "pcbs-bethlehem-2021",
+      "organization": "Palestinian Central Bureau of Statistics (PCBS)",
+      "title": "Projected Mid-Year Population for Bethlehem Governorate by Locality 2017-2026",
+      "url": "https://microdata.pcbs.gov.ps/statisticsIndicatorsTables.aspx?lang=en&table_id=704",
+      "sourceType": "GOVERNMENT",
+      "year": 2021
+    },
+    {
+      "id": "pcbs-qalqilya-2021",
+      "organization": "Palestinian Central Bureau of Statistics (PCBS)",
+      "title": "Projected Mid-Year Population for Qalqiliya Governorate by Locality 2017-2026",
+      "url": "https://microdata.pcbs.gov.ps/statisticsIndicatorsTables.aspx?lang=en&table_id=700",
+      "sourceType": "GOVERNMENT",
+      "year": 2021
+    },
+    {
+      "id": "arij-beita-2014",
+      "organization": "Applied Research Institute - Jerusalem (ARIJ)",
+      "title": "Beita Town Profile (including Za'tara Locality)",
+      "url": "https://vprofile.arij.org/nablus/pdfs/vprofile/Beita_vp_en.pdf",
+      "sourceType": "ARTICLE",
+      "year": 2014
+    },
+    {
+      "id": "arij-aqraba-2014",
+      "organization": "Applied Research Institute - Jerusalem (ARIJ)",
+      "title": "Aqraba Town Profile (including Yanun Locality)",
+      "url": "https://vprofile.arij.org/nablus/pdfs/vprofile/Aqraba_vp_en.pdf",
+      "sourceType": "ARTICLE",
+      "year": 2014
+    },
+    {
+      "id": "arij-huwwara-2014",
+      "organization": "Applied Research Institute - Jerusalem (ARIJ)",
+      "title": "Huwwara Town Profile",
+      "url": "https://vprofile.arij.org/nablus/pdfs/vprofile/Huwwara_tp_en.pdf",
+      "sourceType": "ARTICLE",
+      "year": 2014
+    },
+    {
+      "id": "arij-awarta-2014",
+      "organization": "Applied Research Institute - Jerusalem (ARIJ)",
+      "title": "'Awarta Village Profile",
+      "url": "https://vprofile.arij.org/nablus/pdfs/vprofile/Awarta_vp_en.pdf",
+      "sourceType": "ARTICLE",
+      "year": 2014
+    },
+    {
+      "id": "arij-jammain-2014",
+      "organization": "Applied Research Institute - Jerusalem (ARIJ)",
+      "title": "Jamma'in Town Profile",
+      "url": "https://vprofile.arij.org/nablus/pdfs/vprofile/Jamma'in_vp_en.pdf",
+      "sourceType": "ARTICLE",
+      "year": 2014
+    },
+    {
+      "id": "arij-sinjil-2012",
+      "organization": "Applied Research Institute - Jerusalem (ARIJ)",
+      "title": "Sinjil Town Profile",
+      "url": "https://vprofile.arij.org/ramallah/pdfs/vprofile/sinjil_tp_en.pdf",
+      "sourceType": "ARTICLE",
+      "year": 2012
+    },
+    {
+      "id": "arij-battir-2010",
+      "organization": "Applied Research Institute - Jerusalem (ARIJ)",
+      "title": "Battir Village Profile",
+      "url": "https://vprofile.arij.org/bethlehem/pdfs/VP/Battir_vp_en.pdf",
+      "sourceType": "ARTICLE",
+      "year": 2010
+    },
+    {
+      "id": "arij-kafr-qaddum-2013",
+      "organization": "Applied Research Institute - Jerusalem (ARIJ)",
+      "title": "Kafr Qaddum Village Profile",
+      "url": "https://vprofile.arij.org/qalqiliya/pdfs/vprofile/kafqaddum-vp-en.pdf",
+      "sourceType": "ARTICLE",
+      "year": 2013
+    },
+    {
+      "id": "arij-jayyus-2013",
+      "organization": "Applied Research Institute - Jerusalem (ARIJ)",
+      "title": "Jayyus Town Profile (including Khirbet Sir Locality)",
+      "url": "https://vprofile.arij.org/qalqiliya/pdfs/vprofile/jayyus_vp_en.pdf",
+      "sourceType": "ARTICLE",
+      "year": 2013
+    },
+    {
+      "id": "unesco-battir",
+      "organization": "UNESCO World Heritage Centre",
+      "title": "Palestine: Land of Olives and Vines - Cultural Landscape of Southern Jerusalem, Battir",
+      "url": "https://whc.unesco.org/en/list/1492",
+      "sourceType": "WEBSITE",
+      "year": 2014
+    },
+    {
+      "id": "unesco-sebastia-2026",
+      "organization": "UNESCO World Heritage Centre",
+      "title": "Sebastia - Decision 48 COM 8B.3",
+      "url": "https://whc.unesco.org/en/decisions/9154/",
+      "sourceType": "WEBSITE",
+      "year": 2026
+    },
+    {
+      "id": "alquds-jammain-ebiv-2021",
+      "organization": "Al-Quds University / Revue Minbar et-Tourath el-Etheri",
+      "title": "The Jamma'in EB-IV Tomb: The Impact of Urban Development on Archaeological Resources in Palestine",
+      "url": "https://dspace.alquds.edu/bitstreams/f10847e5-3000-4acc-85a4-b40f05a0765e/download",
+      "sourceType": "ARTICLE",
+      "year": 2021
+    }
+  ],
+  "villages": [
+    {
+      "slug": "beita",
+      "nameAr": "بيتا",
+      "nameEn": "Beita",
+      "governorate": "نابلس",
+      "pcbsLocalityCode": "151215",
+      "localAuthority": {
+        "nameAr": "بلدية بيتا",
+        "nameEn": "Beita Municipality",
+        "type": "MUNICIPALITY",
+        "asOfYear": 2014,
+        "sourceId": "arij-beita-2014"
+      },
+      "coordinates": null,
+      "elevationM": 572,
+      "areaDunums": null,
+      "locationDescription": "بلدة فلسطينية تقع جنوب مدينة نابلس، ويشمل ملف ARIJ بيتا مع تجمع زعترة.",
+      "nameOrigin": "يرتبط الاسم بكلمة «بيت/منزل» في المصادر التاريخية التي يستشهد بها ملف البلدة.",
+      "historicalOverview": "بلدة قديمة في جنوب محافظة نابلس، وتوجد فيها مبانٍ ومواقع ذات طبقات تاريخية قديمة.",
+      "populationRecords": [
+        {
+          "referenceYear": 2021,
+          "population": 12503,
+          "isEstimate": true,
+          "isPreferred": true,
+          "estimateType": "PCBS projected mid-year population",
+          "sourceId": "pcbs-nablus-2021"
+        }
+      ],
+      "landmarks": [
+        {
+          "nameAr": "جبل العُرمة",
+          "nameEn": "Jabal al-'Urma",
+          "landmarkType": "OTHER",
+          "description": "جبل يقع شرقي بيتا ويرتفع إلى نحو 843 م.",
+          "sourceId": "arij-beita-2014"
+        },
+        {
+          "nameAr": "مساجد محلية",
+          "nameEn": null,
+          "landmarkType": "RELIGIOUS",
+          "description": "تذكر المصادر المحلية وجود عدة مساجد في البلدة.",
+          "sourceId": "arij-beita-2014"
+        }
+      ],
+      "heritageItems": [
+        {
+          "category": "AGRI_PRACTICE",
+          "name": "زراعة الزيتون والزراعة التقليدية",
+          "description": "الزراعة من الأنشطة التقليدية المهمة في المنطقة.",
+          "sourceId": "arij-beita-2014"
+        }
+      ],
+      "economicActivities": [
+        {
+          "category": "TRADE",
+          "name": "التجارة",
+          "description": "قطاع تجاري نشط؛ تشير مصادر ARIJ إلى أن التجارة قطاع رئيسي في قوة العمل.",
+          "asOfYear": 2014,
+          "sourceId": "arij-beita-2014"
+        },
+        {
+          "category": "CROP",
+          "name": "الزراعة",
+          "description": "نشاط زراعي محلي يشمل الزيتون ومحاصيل أخرى.",
+          "asOfYear": 2014,
+          "sourceId": "arij-beita-2014"
+        }
+      ],
+      "facilities": [
+        {
+          "facilityType": "CLINIC",
+          "name": "عيادات ومراكز صحية محلية",
+          "description": "تذكر المصادر المحلية وجود عدة عيادات في بيتا.",
+          "asOfYear": 2014,
+          "sourceId": "arij-beita-2014"
+        }
+      ],
+      "historicalEvents": [],
+      "villageNames": [
+        {
+          "name": "Bayta",
+          "language": "en",
+          "nameType": "TRANSLITERATION",
+          "sourceId": "arij-beita-2014"
+        }
+      ],
+      "nearbyPlaces": [],
+      "sourceIds": [
+        "pcbs-nablus-2021",
+        "arij-beita-2014"
+      ],
+      "nameOriginSourceId": "arij-beita-2014"
+    },
+    {
+      "slug": "aqraba",
+      "nameAr": "عقربا",
+      "nameEn": "Aqraba",
+      "governorate": "نابلس",
+      "pcbsLocalityCode": "151270",
+      "localAuthority": {
+        "nameAr": "بلدية عقربا",
+        "nameEn": "Aqraba Municipality",
+        "type": "MUNICIPALITY",
+        "asOfYear": 2013,
+        "sourceId": "arij-aqraba-2014"
+      },
+      "coordinates": null,
+      "elevationM": null,
+      "areaDunums": null,
+      "locationDescription": "بلدة فلسطينية جنوب شرق نابلس؛ يغطي ملف ARIJ عقربا مع تجمع يانون.",
+      "nameOrigin": null,
+      "historicalOverview": "عقربا بلدة ذات جذور تاريخية موثقة في مصادر أثرية وتاريخية متعددة، ويعرض ملف ARIJ وصفاً مجتمعياً وتنموياً لها.",
+      "populationRecords": [
+        {
+          "referenceYear": 2021,
+          "population": 10728,
+          "isEstimate": true,
+          "isPreferred": true,
+          "estimateType": "PCBS projected mid-year population",
+          "sourceId": "pcbs-nablus-2021"
+        }
+      ],
+      "landmarks": [],
+      "heritageItems": [
+        {
+          "category": "AGRI_PRACTICE",
+          "name": "الزراعة التقليدية",
+          "description": "الزراعة هي النشاط الاقتصادي الأبرز بحسب مسح ARIJ.",
+          "sourceId": "arij-aqraba-2014"
+        }
+      ],
+      "economicActivities": [
+        {
+          "category": "CROP",
+          "name": "الزراعة",
+          "description": "حوالي 55% من قوة العمل وفق مسح ميداني أورده ARIJ لعام 2013.",
+          "asOfYear": 2013,
+          "sourceId": "arij-aqraba-2014"
+        },
+        {
+          "category": "TRADE",
+          "name": "التجارة",
+          "description": "قطاع تجاري محلي موثق في ملف ARIJ.",
+          "asOfYear": 2013,
+          "sourceId": "arij-aqraba-2014"
+        },
+        {
+          "category": "INDUSTRY",
+          "name": "الصناعة والحرف",
+          "description": "ورش ومهن وصناعات محلية موثقة في ملف ARIJ.",
+          "asOfYear": 2013,
+          "sourceId": "arij-aqraba-2014"
+        }
+      ],
+      "facilities": [
+        {
+          "facilityType": "CLINIC",
+          "name": "العيادة الصحية الحكومية في عقربا",
+          "description": "مذكورة في ملف ARIJ مع ملاحظات على توفر الأطباء والخدمات.",
+          "asOfYear": 2013,
+          "sourceId": "arij-aqraba-2014"
+        },
+        {
+          "facilityType": "OTHER",
+          "name": "معاصر زيتون",
+          "description": "يذكر ملف ARIJ وجود ثلاث معاصر زيتون.",
+          "asOfYear": 2013,
+          "sourceId": "arij-aqraba-2014"
+        }
+      ],
+      "historicalEvents": [],
+      "villageNames": [],
+      "nearbyPlaces": [],
+      "sourceIds": [
+        "pcbs-nablus-2021",
+        "arij-aqraba-2014"
+      ]
+    },
+    {
+      "slug": "huwwara",
+      "nameAr": "حوارة",
+      "nameEn": "Huwwara",
+      "governorate": "نابلس",
+      "pcbsLocalityCode": "151185",
+      "localAuthority": {
+        "nameAr": "بلدية حوارة",
+        "nameEn": "Huwwara Municipality",
+        "type": "MUNICIPALITY",
+        "asOfYear": 2013,
+        "sourceId": "arij-huwwara-2014"
+      },
+      "coordinates": null,
+      "elevationM": 503,
+      "areaDunums": null,
+      "locationDescription": "بلدة فلسطينية تقع نحو 7.28 كم جنوب مدينة نابلس.",
+      "nameOrigin": null,
+      "historicalOverview": "بلدة على محور مواصلات رئيسي جنوب نابلس، ولها حضور تجاري وخدمي بارز في محيطها.",
+      "populationRecords": [
+        {
+          "referenceYear": 2021,
+          "population": 7127,
+          "isEstimate": true,
+          "isPreferred": true,
+          "estimateType": "PCBS projected mid-year population",
+          "sourceId": "pcbs-nablus-2021"
+        }
+      ],
+      "landmarks": [],
+      "heritageItems": [],
+      "economicActivities": [
+        {
+          "category": "TRADE",
+          "name": "التجارة",
+          "description": "القطاع الأكبر في مسح ARIJ لعام 2013، بنحو 47.3% من قوة العمل.",
+          "asOfYear": 2013,
+          "sourceId": "arij-huwwara-2014"
+        },
+        {
+          "category": "INDUSTRY",
+          "name": "الصناعة",
+          "description": "نحو 8% من قوة العمل وفق ملف ARIJ.",
+          "asOfYear": 2013,
+          "sourceId": "arij-huwwara-2014"
+        },
+        {
+          "category": "CROP",
+          "name": "الزراعة",
+          "description": "نشاط زراعي موثق وإن كان أصغر من التجارة.",
+          "asOfYear": 2013,
+          "sourceId": "arij-huwwara-2014"
+        }
+      ],
+      "facilities": [
+        {
+          "facilityType": "CLINIC",
+          "name": "مرافق رعاية صحية محلية",
+          "description": "توجد خدمات رعاية صحية محلية موثقة ضمن ملفات البلدة.",
+          "asOfYear": 2013,
+          "sourceId": "arij-huwwara-2014"
+        }
+      ],
+      "historicalEvents": [],
+      "villageNames": [
+        {
+          "name": "Huwara",
+          "language": "en",
+          "nameType": "ALT_SPELLING",
+          "sourceId": "arij-huwwara-2014"
+        }
+      ],
+      "nearbyPlaces": [],
+      "sourceIds": [
+        "pcbs-nablus-2021",
+        "arij-huwwara-2014"
+      ]
+    },
+    {
+      "slug": "awarta",
+      "nameAr": "عورتا",
+      "nameEn": "Awarta",
+      "governorate": "نابلس",
+      "pcbsLocalityCode": "151135",
+      "localAuthority": {
+        "nameAr": "مجلس قروي عورتا",
+        "nameEn": "Awarta Village Council",
+        "type": "VILLAGE_COUNCIL",
+        "asOfYear": 2013,
+        "sourceId": "arij-awarta-2014"
+      },
+      "coordinates": null,
+      "elevationM": 875,
+      "areaDunums": null,
+      "locationDescription": "قرية فلسطينية تقع نحو 6.87 كم جنوب مدينة نابلس.",
+      "nameOrigin": "يذكر ARIJ أن الاسم ذو أصل سرياني وقد يحمل معنى «المخفية/التي بلا نوافذ».",
+      "historicalOverview": "تضم القرية مواقع دينية وأثرية محلية، ويشير ملف ARIJ إلى تاريخ استيطان محلي قديم.",
+      "populationRecords": [
+        {
+          "referenceYear": 2021,
+          "population": 7550,
+          "isEstimate": true,
+          "isPreferred": true,
+          "estimateType": "PCBS projected mid-year population",
+          "sourceId": "pcbs-nablus-2021"
+        }
+      ],
+      "landmarks": [
+        {
+          "nameAr": "منطقة الخِربة",
+          "nameEn": "Al Khirbet area",
+          "landmarkType": "ARCHAEOLOGICAL",
+          "description": "موقع ذو أهمية أثرية محلية.",
+          "sourceId": "arij-awarta-2014"
+        },
+        {
+          "nameAr": "المسجد القديم",
+          "nameEn": "Old Mosque",
+          "landmarkType": "RELIGIOUS",
+          "description": "أحد المواقع الدينية والأثرية المذكورة في ملف ARIJ.",
+          "sourceId": "arij-awarta-2014"
+        },
+        {
+          "nameAr": "مقام العزيز سمرا",
+          "nameEn": "Tomb of Al Aziz Samra",
+          "landmarkType": "RELIGIOUS",
+          "description": "مقام محلي مذكور ضمن المواقع الدينية والأثرية.",
+          "sourceId": "arij-awarta-2014"
+        }
+      ],
+      "heritageItems": [
+        {
+          "category": "CUSTOM",
+          "name": "المقامات والمواقع الدينية المحلية",
+          "description": "جزء من الموروث الديني المحلي الموثق في ملف القرية.",
+          "sourceId": "arij-awarta-2014"
+        }
+      ],
+      "economicActivities": [
+        {
+          "category": "CROP",
+          "name": "الزراعة",
+          "description": "نحو 20% من قوة العمل وفق مسح ARIJ لعام 2013.",
+          "asOfYear": 2013,
+          "sourceId": "arij-awarta-2014"
+        },
+        {
+          "category": "TRADE",
+          "name": "التجارة",
+          "description": "نشاط تجاري محلي موثق.",
+          "asOfYear": 2013,
+          "sourceId": "arij-awarta-2014"
+        },
+        {
+          "category": "INDUSTRY",
+          "name": "الصناعة والورش",
+          "description": "نشاط صناعي ومهني محلي موثق.",
+          "asOfYear": 2013,
+          "sourceId": "arij-awarta-2014"
+        }
+      ],
+      "facilities": [
+        {
+          "facilityType": "CLINIC",
+          "name": "عيادة عورتا الحكومية",
+          "description": "عيادة صحية حكومية مذكورة في ملف ARIJ.",
+          "asOfYear": 2013,
+          "sourceId": "arij-awarta-2014"
+        },
+        {
+          "facilityType": "CLINIC",
+          "name": "مركز صحي تابع للجان العمل الصحي",
+          "description": "مركز صحي وصيدلية تابعان للجان العمل الصحي بحسب ملف ARIJ.",
+          "asOfYear": 2013,
+          "sourceId": "arij-awarta-2014"
+        },
+        {
+          "facilityType": "SCHOOL",
+          "name": "مدارس عورتا",
+          "description": "يوثق الملف مدارس محلية للبنين والبنات والتعليم الأساسي.",
+          "asOfYear": 2012,
+          "sourceId": "arij-awarta-2014"
+        }
+      ],
+      "historicalEvents": [],
+      "villageNames": [
+        {
+          "name": "'Awarta",
+          "language": "en",
+          "nameType": "TRANSLITERATION",
+          "sourceId": "arij-awarta-2014"
+        }
+      ],
+      "nearbyPlaces": [],
+      "sourceIds": [
+        "pcbs-nablus-2021",
+        "arij-awarta-2014"
+      ],
+      "nameOriginSourceId": "arij-awarta-2014"
+    },
+    {
+      "slug": "jammain",
+      "nameAr": "جمّاعين",
+      "nameEn": "Jamma'in",
+      "governorate": "نابلس",
+      "pcbsLocalityCode": "151245",
+      "localAuthority": {
+        "nameAr": "بلدية جمّاعين",
+        "nameEn": "Jamma'in Municipality",
+        "type": "MUNICIPALITY",
+        "asOfYear": 2014,
+        "sourceId": "arij-jammain-2014"
+      },
+      "coordinates": null,
+      "elevationM": 542,
+      "areaDunums": 19420,
+      "locationDescription": "بلدة فلسطينية تقع نحو 11.26 كم جنوب مدينة نابلس.",
+      "nameOrigin": "يرتبط الاسم بمعنى «الجامعين/المجتمعين»، وتورد المصادر أكثر من رواية تاريخية لتفسيره.",
+      "historicalOverview": "بلدة ذات تاريخ ديني وأثري؛ ارتبط اسمها بعدد من العلماء في العصور الوسطى وتوجد فيها موارد أثرية موثقة.",
+      "populationRecords": [
+        {
+          "referenceYear": 2021,
+          "population": 7958,
+          "isEstimate": true,
+          "isPreferred": true,
+          "estimateType": "PCBS projected mid-year population",
+          "sourceId": "pcbs-nablus-2021"
+        }
+      ],
+      "landmarks": [
+        {
+          "nameAr": "مدفن جمّاعين من العصر البرونزي المبكر الرابع",
+          "nameEn": "Jamma'in EB-IV tomb",
+          "landmarkType": "ARCHAEOLOGICAL",
+          "description": "موقع/مدفن أثري موثق في دراسات أثرية عن جمّاعين.",
+          "sourceId": "alquds-jammain-ebiv-2021"
+        },
+        {
+          "nameAr": "مساجد جمّاعين",
+          "nameEn": null,
+          "landmarkType": "RELIGIOUS",
+          "description": "يوثق المصدر وجود مسجدين في البلدة.",
+          "sourceId": "arij-jammain-2014"
+        }
+      ],
+      "heritageItems": [
+        {
+          "category": "CRAFT",
+          "name": "صناعة السلال من جريد الزيتون",
+          "description": "حرفة محلية معروفة في جمّاعين ومحيطها.",
+          "sourceId": "arij-jammain-2014"
+        }
+      ],
+      "economicActivities": [
+        {
+          "category": "INDUSTRY",
+          "name": "قصّ الحجر والمحاجر",
+          "description": "أحد أبرز القطاعات الاقتصادية في البلدة.",
+          "asOfYear": 2014,
+          "sourceId": "arij-jammain-2014"
+        },
+        {
+          "category": "CROP",
+          "name": "الزراعة وزراعة الزيتون",
+          "description": "الزراعة، وخاصة الزيتون، نشاط اقتصادي رئيسي.",
+          "asOfYear": 2014,
+          "sourceId": "arij-jammain-2014"
+        },
+        {
+          "category": "LIVESTOCK",
+          "name": "تربية الأغنام والأبقار",
+          "description": "نشاط حيواني محلي موثق.",
+          "asOfYear": 2014,
+          "sourceId": "arij-jammain-2014"
+        }
+      ],
+      "facilities": [
+        {
+          "facilityType": "SCHOOL",
+          "name": "مدارس جمّاعين",
+          "description": "يوثق المصدر وجود خمس مدارس للبنين والبنات والتعليم المختلط.",
+          "asOfYear": 2014,
+          "sourceId": "arij-jammain-2014"
+        },
+        {
+          "facilityType": "LIBRARY",
+          "name": "مكتبة محلية",
+          "description": "مكتبة محلية مذكورة ضمن مرافق البلدة.",
+          "asOfYear": 2014,
+          "sourceId": "arij-jammain-2014"
+        }
+      ],
+      "historicalEvents": [],
+      "villageNames": [],
+      "nearbyPlaces": [],
+      "sourceIds": [
+        "pcbs-nablus-2021",
+        "arij-jammain-2014",
+        "alquds-jammain-ebiv-2021"
+      ],
+      "nameOriginSourceId": "arij-jammain-2014"
+    },
+    {
+      "slug": "sabastiya",
+      "nameAr": "سبسطية",
+      "nameEn": "Sebastia",
+      "governorate": "نابلس",
+      "pcbsLocalityCode": "150765",
+      "localAuthority": {
+        "nameAr": "بلدية سبسطية",
+        "nameEn": "Sebastia Municipality",
+        "type": "MUNICIPALITY",
+        "asOfYear": 2026,
+        "sourceId": "unesco-sebastia-2026"
+      },
+      "coordinates": {
+        "latitude": 32.2763389,
+        "longitude": 35.188875,
+        "note": "UNESCO coordinates refer to the inscribed Sebastia property."
+      },
+      "elevationM": null,
+      "areaDunums": null,
+      "locationDescription": "بلدة وموقع أثري متعدد الطبقات يقع شمال غرب نابلس.",
+      "nameOrigin": "أعاد هيرودس الكبير تسمية المدينة إلى Sebaste تكريماً للإمبراطور أغسطس.",
+      "historicalOverview": "موقع متعدد الفترات يحفظ بقايا من العصر الحديدي والهلنستي والروماني والبيزنطي والوسيط والعثماني.",
+      "populationRecords": [
+        {
+          "referenceYear": 2021,
+          "population": 3430,
+          "isEstimate": true,
+          "isPreferred": true,
+          "estimateType": "PCBS projected mid-year population",
+          "sourceId": "pcbs-nablus-2021"
+        }
+      ],
+      "landmarks": [
+        {
+          "nameAr": "الموقع الأثري في سبسطية",
+          "nameEn": "Sebastia archaeological site",
+          "landmarkType": "ARCHAEOLOGICAL",
+          "description": "موقع متعدد الطبقات التاريخية مدرج على قائمة التراث العالمي لليونسكو في 2026.",
+          "sourceId": "unesco-sebastia-2026"
+        },
+        {
+          "nameAr": "مسجد ومقام النبي يحيى",
+          "nameEn": "Nabi Yahya Mosque and traditional tomb",
+          "landmarkType": "RELIGIOUS",
+          "description": "موقع ديني تاريخي مرتبط بتقاليد محلية مسيحية وإسلامية.",
+          "sourceId": "unesco-sebastia-2026"
+        }
+      ],
+      "heritageItems": [
+        {
+          "category": "OTHER",
+          "name": "التراث الأثري متعدد الفترات في سبسطية",
+          "description": "طبقات أثرية ومعمارية ممتدة من العصر الحديدي إلى الفترات اللاحقة.",
+          "sourceId": "unesco-sebastia-2026"
+        }
+      ],
+      "economicActivities": [],
+      "facilities": [],
+      "historicalEvents": [
+        {
+          "title": "إدراج سبسطية على قائمة التراث العالمي",
+          "description": "أدرجت لجنة التراث العالمي سبسطية على قائمة التراث العالمي وفق الإجراء الطارئ.",
+          "eventYear": 2026,
+          "isApproximate": false,
+          "category": "heritage",
+          "sourceId": "unesco-sebastia-2026"
+        }
+      ],
+      "villageNames": [
+        {
+          "name": "Sabastiya",
+          "language": "en",
+          "nameType": "ALT_SPELLING",
+          "sourceId": "unesco-sebastia-2026"
+        }
+      ],
+      "nearbyPlaces": [],
+      "sourceIds": [
+        "pcbs-nablus-2021",
+        "unesco-sebastia-2026"
+      ],
+      "nameOriginSourceId": "unesco-sebastia-2026"
+    },
+    {
+      "slug": "sinjil",
+      "nameAr": "سنجل",
+      "nameEn": "Sinjil",
+      "governorate": "رام الله والبيرة",
+      "pcbsLocalityCode": "301500",
+      "localAuthority": {
+        "nameAr": "بلدية سنجل",
+        "nameEn": "Sinjil Municipal Council",
+        "type": "MUNICIPALITY",
+        "asOfYear": 2010,
+        "sourceId": "arij-sinjil-2012"
+      },
+      "coordinates": null,
+      "elevationM": 795,
+      "areaDunums": null,
+      "locationDescription": "بلدة فلسطينية تقع نحو 15.5 كم شمال شرق رام الله.",
+      "nameOrigin": null,
+      "historicalOverview": "تضم سنجل بقايا ومواقع أثرية محلية، منها حجارة ومدافن منحوتة في الصخر في خربة غرابة كما يورد ملف ARIJ.",
+      "populationRecords": [
+        {
+          "referenceYear": 2021,
+          "population": 6202,
+          "isEstimate": true,
+          "isPreferred": true,
+          "estimateType": "PCBS projected mid-year population",
+          "sourceId": "pcbs-ramallah-2021"
+        }
+      ],
+      "landmarks": [
+        {
+          "nameAr": "خربة غرابة",
+          "nameEn": "Khirbet Gharaba",
+          "landmarkType": "ARCHAEOLOGICAL",
+          "description": "بقايا مبانٍ وحجارة ومدافن منحوتة في الصخر.",
+          "sourceId": "arij-sinjil-2012"
+        }
+      ],
+      "heritageItems": [],
+      "economicActivities": [
+        {
+          "category": "CROP",
+          "name": "الزراعة",
+          "description": "نحو 25% من قوة العمل وفق مسح ARIJ/المجلس البلدي لعام 2010.",
+          "asOfYear": 2010,
+          "sourceId": "arij-sinjil-2012"
+        },
+        {
+          "category": "INDUSTRY",
+          "name": "الصناعة",
+          "description": "نحو 15% من قوة العمل وفق المصدر نفسه.",
+          "asOfYear": 2010,
+          "sourceId": "arij-sinjil-2012"
+        },
+        {
+          "category": "TRADE",
+          "name": "التجارة",
+          "description": "نحو 10% من قوة العمل وفق المصدر نفسه.",
+          "asOfYear": 2010,
+          "sourceId": "arij-sinjil-2012"
+        }
+      ],
+      "facilities": [
+        {
+          "facilityType": "CLINIC",
+          "name": "مركز طبي تابع لجمعية الإغاثة الطبية الفلسطينية",
+          "description": "مركز طبي موثق في ملف ARIJ.",
+          "asOfYear": 2010,
+          "sourceId": "arij-sinjil-2012"
+        },
+        {
+          "facilityType": "CLINIC",
+          "name": "صيدلية خاصة",
+          "description": "صيدلية خاصة موثقة في ملف ARIJ.",
+          "asOfYear": 2010,
+          "sourceId": "arij-sinjil-2012"
+        }
+      ],
+      "historicalEvents": [],
+      "villageNames": [],
+      "nearbyPlaces": [],
+      "sourceIds": [
+        "pcbs-ramallah-2021",
+        "arij-sinjil-2012"
+      ]
+    },
+    {
+      "slug": "battir",
+      "nameAr": "بتير",
+      "nameEn": "Battir",
+      "governorate": "بيت لحم",
+      "pcbsLocalityCode": "452175",
+      "localAuthority": {
+        "nameAr": "مجلس قروي بتير",
+        "nameEn": "Battir Village Council",
+        "type": "VILLAGE_COUNCIL",
+        "asOfYear": 2010,
+        "sourceId": "arij-battir-2010"
+      },
+      "coordinates": null,
+      "elevationM": 761,
+      "areaDunums": null,
+      "locationDescription": "قرية فلسطينية تقع نحو 6.4 كم شمال غرب مدينة بيت لحم، ضمن مشهد زراعي جبلي تاريخي.",
+      "nameOrigin": "تورد مصادر محلية رواية تربط الاسم بالكلمة الفينيقية «Batara»، مع وجود روايات أخرى لأصل الاسم.",
+      "historicalOverview": "تشتهر بتير بمشهدها الزراعي المدرّج ونظام توزيع المياه التقليدي، وباستمرارية استخدام المصاطب والقنوات عبر فترات طويلة.",
+      "populationRecords": [
+        {
+          "referenceYear": 2021,
+          "population": 5072,
+          "isEstimate": true,
+          "isPreferred": true,
+          "estimateType": "PCBS projected mid-year population",
+          "sourceId": "pcbs-bethlehem-2021"
+        }
+      ],
+      "landmarks": [
+        {
+          "nameAr": "عين البلد",
+          "nameEn": "Ein Al Balad",
+          "landmarkType": "SPRING",
+          "description": "عين ومصدر ماء مرتبط بنظام الري التقليدي في بتير.",
+          "sourceId": "arij-battir-2010"
+        },
+        {
+          "nameAr": "المشهد الثقافي لبتير",
+          "nameEn": "Battir Cultural Landscape",
+          "landmarkType": "HERITAGE_SITE",
+          "description": "موقع تراث عالمي لليونسكو يضم مصاطب زراعية وشبكة ري تاريخية.",
+          "sourceId": "unesco-battir"
+        },
+        {
+          "nameAr": "المصاطب وقنوات الري التقليدية",
+          "nameEn": "Traditional terraces and irrigation channels",
+          "landmarkType": "HERITAGE_SITE",
+          "description": "عناصر أساسية في القيمة التراثية للمشهد الثقافي.",
+          "sourceId": "unesco-battir"
+        }
+      ],
+      "heritageItems": [
+        {
+          "category": "AGRI_PRACTICE",
+          "name": "نظام الري وتوزيع المياه التقليدي",
+          "description": "نظام تقليدي لتوزيع مياه الينابيع على الأراضي المدرجة وفق أدوار زمنية بين العائلات.",
+          "sourceId": "unesco-battir"
+        },
+        {
+          "category": "AGRI_PRACTICE",
+          "name": "الزراعة على المصاطب الحجرية",
+          "description": "استمرار زراعة الزيتون والعنب والخضروات على المصاطب الجافة والمروية.",
+          "sourceId": "unesco-battir"
+        }
+      ],
+      "economicActivities": [
+        {
+          "category": "CROP",
+          "name": "زراعة الزيتون",
+          "description": "جزء رئيسي من المشهد الزراعي التقليدي.",
+          "asOfYear": 2014,
+          "sourceId": "unesco-battir"
+        },
+        {
+          "category": "CROP",
+          "name": "زراعة العنب",
+          "description": "موثقة ضمن وصف اليونسكو للمشهد الثقافي.",
+          "asOfYear": 2014,
+          "sourceId": "unesco-battir"
+        },
+        {
+          "category": "CROP",
+          "name": "زراعة الخضروات",
+          "description": "تستخدم بعض المصاطب المروية لإنتاج الخضروات.",
+          "asOfYear": 2014,
+          "sourceId": "unesco-battir"
+        }
+      ],
+      "facilities": [],
+      "historicalEvents": [
+        {
+          "title": "إدراج المشهد الثقافي لبتير على قائمة التراث العالمي",
+          "description": "أدرجت اليونسكو «فلسطين: أرض الزيتون والكرمة - المشهد الثقافي لجنوب القدس، بتير» على قائمة التراث العالمي.",
+          "eventYear": 2014,
+          "isApproximate": false,
+          "category": "heritage",
+          "sourceId": "unesco-battir"
+        }
+      ],
+      "villageNames": [],
+      "nearbyPlaces": [],
+      "sourceIds": [
+        "pcbs-bethlehem-2021",
+        "arij-battir-2010",
+        "unesco-battir"
+      ],
+      "nameOriginSourceId": "arij-battir-2010"
+    },
+    {
+      "slug": "kafr-qaddum",
+      "nameAr": "كفر قدوم",
+      "nameEn": "Kafr Qaddum",
+      "governorate": "قلقيلية",
+      "pcbsLocalityCode": "200925",
+      "localAuthority": {
+        "nameAr": "مجلس قروي كفر قدوم",
+        "nameEn": "Kafr Qaddum Village Council",
+        "type": "VILLAGE_COUNCIL",
+        "asOfYear": 2012,
+        "sourceId": "arij-kafr-qaddum-2013"
+      },
+      "coordinates": null,
+      "elevationM": null,
+      "areaDunums": 18943,
+      "locationDescription": "بلدة/قرية فلسطينية في محافظة قلقيلية تقع شرق مدينة قلقيلية وغرب نابلس.",
+      "nameOrigin": null,
+      "historicalOverview": "تظهر كفر قدوم في سجلات تاريخية متعددة، ويعرض ملف ARIJ واقعها السكاني والزراعي والخدمي.",
+      "populationRecords": [
+        {
+          "referenceYear": 2021,
+          "population": 3551,
+          "isEstimate": true,
+          "isPreferred": true,
+          "estimateType": "PCBS projected mid-year population",
+          "sourceId": "pcbs-qalqilya-2021"
+        }
+      ],
+      "landmarks": [],
+      "heritageItems": [
+        {
+          "category": "AGRI_PRACTICE",
+          "name": "زراعة الزيتون",
+          "description": "الزيتون عنصر رئيسي في استخدامات الأراضي والزراعة المحلية.",
+          "sourceId": "arij-kafr-qaddum-2013"
+        }
+      ],
+      "economicActivities": [
+        {
+          "category": "CROP",
+          "name": "الزراعة",
+          "description": "القطاع الرئيسي؛ نحو 70% من قوة العمل وفق مسح ARIJ لعام 2012.",
+          "asOfYear": 2012,
+          "sourceId": "arij-kafr-qaddum-2013"
+        },
+        {
+          "category": "TRADE",
+          "name": "التجارة",
+          "description": "نحو 6% من قوة العمل وفق المصدر نفسه.",
+          "asOfYear": 2012,
+          "sourceId": "arij-kafr-qaddum-2013"
+        },
+        {
+          "category": "INDUSTRY",
+          "name": "الصناعة",
+          "description": "نحو 6% من قوة العمل وفق المصدر نفسه.",
+          "asOfYear": 2012,
+          "sourceId": "arij-kafr-qaddum-2013"
+        }
+      ],
+      "facilities": [
+        {
+          "facilityType": "CLINIC",
+          "name": "عيادة طبيب عام حكومية",
+          "description": "إحدى ثلاث عيادات طب عام موثقة في ملف ARIJ.",
+          "asOfYear": 2012,
+          "sourceId": "arij-kafr-qaddum-2013"
+        },
+        {
+          "facilityType": "CLINIC",
+          "name": "عيادة طبيب عام خاصة",
+          "description": "مرفق صحي خاص موثق.",
+          "asOfYear": 2012,
+          "sourceId": "arij-kafr-qaddum-2013"
+        },
+        {
+          "facilityType": "CLINIC",
+          "name": "عيادة تابعة للأونروا",
+          "description": "مرفق صحي موثق في ملف ARIJ.",
+          "asOfYear": 2012,
+          "sourceId": "arij-kafr-qaddum-2013"
+        },
+        {
+          "facilityType": "CLINIC",
+          "name": "عيادة أسنان خاصة",
+          "description": "عيادة أسنان خاصة موثقة في ملف ARIJ.",
+          "asOfYear": 2012,
+          "sourceId": "arij-kafr-qaddum-2013"
+        }
+      ],
+      "historicalEvents": [],
+      "villageNames": [],
+      "nearbyPlaces": [],
+      "sourceIds": [
+        "pcbs-qalqilya-2021",
+        "arij-kafr-qaddum-2013"
+      ]
+    },
+    {
+      "slug": "jayyus",
+      "nameAr": "جيوس",
+      "nameEn": "Jayyus",
+      "governorate": "قلقيلية",
+      "pcbsLocalityCode": "200985",
+      "localAuthority": {
+        "nameAr": "بلدية جيوس",
+        "nameEn": "Jayyus Municipal Council",
+        "type": "MUNICIPALITY",
+        "asOfYear": 2013,
+        "sourceId": "arij-jayyus-2013"
+      },
+      "coordinates": null,
+      "elevationM": null,
+      "areaDunums": null,
+      "locationDescription": "بلدة فلسطينية تقع نحو 7-9 كم شمال شرق مدينة قلقيلية؛ يشمل ملف ARIJ جيوس وخربة صير.",
+      "nameOrigin": null,
+      "historicalOverview": "بلدة زراعية في محافظة قلقيلية، ويغطي ملف ARIJ ظروفها الاجتماعية والاقتصادية والموارد الزراعية والخدمية.",
+      "populationRecords": [
+        {
+          "referenceYear": 2021,
+          "population": 3765,
+          "isEstimate": true,
+          "isPreferred": true,
+          "estimateType": "PCBS projected mid-year population",
+          "sourceId": "pcbs-qalqilya-2021"
+        }
+      ],
+      "landmarks": [],
+      "heritageItems": [
+        {
+          "category": "AGRI_PRACTICE",
+          "name": "الزراعة التقليدية",
+          "description": "الزراعة عنصر أساسي في اقتصاد واستخدامات أراضي جيوس.",
+          "sourceId": "arij-jayyus-2013"
+        }
+      ],
+      "economicActivities": [
+        {
+          "category": "CROP",
+          "name": "الزراعة",
+          "description": "نشاط اقتصادي رئيسي ومصدر معيشة مهم في جيوس.",
+          "asOfYear": 2013,
+          "sourceId": "arij-jayyus-2013"
+        },
+        {
+          "category": "TRADE",
+          "name": "التجارة والخدمات المحلية",
+          "description": "أنشطة اقتصادية محلية مذكورة ضمن ملف البلدة.",
+          "asOfYear": 2013,
+          "sourceId": "arij-jayyus-2013"
+        }
+      ],
+      "facilities": [
+        {
+          "facilityType": "CLINIC",
+          "name": "مرفق رعاية صحية أولية في جيوس",
+          "description": "وجود مرفق صحي أولي موثق في مصادر أممية وملف البلدة.",
+          "asOfYear": 2013,
+          "sourceId": "arij-jayyus-2013"
+        }
+      ],
+      "historicalEvents": [],
+      "villageNames": [
+        {
+          "name": "Jayyous",
+          "language": "en",
+          "nameType": "ALT_SPELLING",
+          "sourceId": "arij-jayyus-2013"
+        }
+      ],
+      "nearbyPlaces": [],
+      "sourceIds": [
+        "pcbs-qalqilya-2021",
+        "arij-jayyus-2013"
+      ]
+    },
+    {
+      "slug": "deir-ghassana",
+      "nameAr": "دير غسانة",
+      "nameEn": "Deir Ghassana",
+      "governorate": "رام الله والبيرة",
+      "pcbsLocalityCode": "301472",
+      "localAuthority": null,
+      "coordinates": null,
+      "elevationM": null,
+      "areaDunums": null,
+      "locationDescription": null,
+      "nameOrigin": null,
+      "historicalOverview": null,
+      "populationRecords": [
+        {
+          "referenceYear": 2021,
+          "population": 1828,
+          "isEstimate": true,
+          "isPreferred": true,
+          "estimateType": "PCBS projected mid-year population",
+          "sourceId": "pcbs-ramallah-2021"
+        }
+      ],
+      "landmarks": [],
+      "heritageItems": [],
+      "economicActivities": [],
+      "facilities": [],
+      "historicalEvents": [],
+      "villageNames": [],
+      "nearbyPlaces": [],
+      "sourceIds": [
+        "pcbs-ramallah-2021"
+      ]
+    },
+    {
+      "slug": "kafr-ein",
+      "nameAr": "كفر عين",
+      "nameEn": "Kafr 'Ein",
+      "governorate": "رام الله والبيرة",
+      "pcbsLocalityCode": "301470",
+      "localAuthority": null,
+      "coordinates": null,
+      "elevationM": null,
+      "areaDunums": null,
+      "locationDescription": null,
+      "nameOrigin": null,
+      "historicalOverview": null,
+      "populationRecords": [
+        {
+          "referenceYear": 2021,
+          "population": 2115,
+          "isEstimate": true,
+          "isPreferred": true,
+          "estimateType": "PCBS projected mid-year population",
+          "sourceId": "pcbs-ramallah-2021"
+        }
+      ],
+      "landmarks": [],
+      "heritageItems": [],
+      "economicActivities": [],
+      "facilities": [],
+      "historicalEvents": [],
+      "villageNames": [],
+      "nearbyPlaces": [],
+      "sourceIds": [
+        "pcbs-ramallah-2021"
+      ]
+    },
+    {
+      "slug": "qarawat-bani-zeid",
+      "nameAr": "قراوة بني زيد",
+      "nameEn": "Qarawat Bani Zeid",
+      "governorate": "رام الله والبيرة",
+      "pcbsLocalityCode": "301455",
+      "localAuthority": null,
+      "coordinates": null,
+      "elevationM": null,
+      "areaDunums": null,
+      "locationDescription": null,
+      "nameOrigin": null,
+      "historicalOverview": null,
+      "populationRecords": [
+        {
+          "referenceYear": 2021,
+          "population": 3689,
+          "isEstimate": true,
+          "isPreferred": true,
+          "estimateType": "PCBS projected mid-year population",
+          "sourceId": "pcbs-ramallah-2021"
+        }
+      ],
+      "landmarks": [],
+      "heritageItems": [],
+      "economicActivities": [],
+      "facilities": [],
+      "historicalEvents": [],
+      "villageNames": [],
+      "nearbyPlaces": [],
+      "sourceIds": [
+        "pcbs-ramallah-2021"
+      ]
+    },
+    {
+      "slug": "al-walaja",
+      "nameAr": "الولجة",
+      "nameEn": "Al Walaja",
+      "governorate": "بيت لحم",
+      "pcbsLocalityCode": "452170",
+      "localAuthority": null,
+      "coordinates": null,
+      "elevationM": null,
+      "areaDunums": null,
+      "locationDescription": null,
+      "nameOrigin": null,
+      "historicalOverview": null,
+      "populationRecords": [
+        {
+          "referenceYear": 2021,
+          "population": 2885,
+          "isEstimate": true,
+          "isPreferred": true,
+          "estimateType": "PCBS projected mid-year population",
+          "sourceId": "pcbs-bethlehem-2021"
+        }
+      ],
+      "landmarks": [],
+      "heritageItems": [],
+      "economicActivities": [],
+      "facilities": [],
+      "historicalEvents": [],
+      "villageNames": [],
+      "nearbyPlaces": [],
+      "sourceIds": [
+        "pcbs-bethlehem-2021"
+      ]
+    }
+  ],
+  "verificationNotes": {
+    "sebastiaWorldHeritage2026": {
+      "status": "confirmed",
+      "sourceId": "unesco-sebastia-2026",
+      "section": "UNESCO Decision 48 COM 8B.3, decision point 2",
+      "note": "Decision point 2 inscribes Sebastia, State of Palestine, on the World Heritage List under the emergency procedure."
+    },
+    "awartaElevation875m": {
+      "status": "confirmed",
+      "sourceId": "arij-awarta-2014",
+      "section": "Awarta Village Profile, printed page 4, Location and physical characteristics",
+      "note": "The profile states that Awarta is located at an altitude of 875 m above sea level."
+    },
+    "beitaArea76000Dunums": {
+      "status": "not-confirmed-from-cited-source",
+      "sourceId": "arij-beita-2014",
+      "section": "Beita Town Profile, printed page 4 and the cited ARIJ profile",
+      "note": "The cited ARIJ profile confirms Beita's location and 572 m altitude, but the 76,000-dunum value was not confirmed from that cited source. areaDunums remains null."
+    },
+    "awartaTombAlAzizSamra": {
+      "status": "confirmed",
+      "sourceId": "arij-awarta-2014",
+      "section": "Awarta Village Profile, printed page 6, Religious and archaeological sites",
+      "note": "The profile explicitly lists the tomb of Al Aziz Samra among sites of archaeological interest."
+    },
+    "jammainEbIvTomb": {
+      "status": "confirmed",
+      "sourceId": "alquds-jammain-ebiv-2021",
+      "section": "Al-Houdalieh & Jamal (2021), p. 329, section 4: Re-visiting the tomb and its description; continuation on p. 330",
+      "note": "The paper documents the Jamma'in EB-IV tomb and states that it is approximately 700 m north of the town's historic core."
+    },
+    "sebastiaMunicipality": {
+      "status": "confirmed",
+      "sourceId": "unesco-sebastia-2026",
+      "section": "UNESCO Decision 48 COM 8B.3, Protection and management requirements",
+      "note": "The section explicitly states that the Sebastia Municipality oversees implementation of planning controls and coordinates with the Ministry."
+    }
+  }
+}

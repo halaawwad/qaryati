@@ -1,5 +1,4 @@
 // Prisma schema for Qaryati.
-// Domain models are added by their respective feature tasks.
 
 generator client {
   provider      = "prisma-client-js"
@@ -9,4 +8,529 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  REVIEWER
+  EDITOR
+}
+
+enum VerificationStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum LocalAuthorityType {
+  MUNICIPALITY
+  VILLAGE_COUNCIL
+  PROJECT_COMMITTEE
+}
+
+enum VillageNameType {
+  FORMER
+  HISTORICAL
+  ALT_SPELLING
+  TRANSLITERATION
+}
+
+enum PlaceType {
+  VILLAGE
+  CITY
+}
+
+enum PlaceRelation {
+  NEARBY
+  ADJACENT
+}
+
+enum SourceType {
+  CENSUS
+  BOOK
+  ARTICLE
+  GOVERNMENT
+  WEBSITE
+  ORAL
+  OTHER
+}
+
+enum LandmarkType {
+  HERITAGE_SITE
+  ARCHAEOLOGICAL
+  TRADITIONAL_BUILDING
+  SPRING
+  RELIGIOUS
+  VIEWPOINT
+  OTHER
+}
+
+enum HeritageCategory {
+  CRAFT
+  FOOD
+  AGRI_PRACTICE
+  CUSTOM
+  OTHER
+}
+
+enum EconomicCategory {
+  CROP
+  LIVESTOCK
+  CRAFT
+  INDUSTRY
+  TRADE
+  OTHER
+}
+
+enum FacilityType {
+  SCHOOL
+  CLINIC
+  LIBRARY
+  COMMUNITY_CENTER
+  PARK
+  SPORTS
+  OTHER
+}
+
+enum ChangeRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  VERIFY
+  REJECT
+  APPROVE
+}
+
+model User {
+  id                   String             @id @default(uuid()) @db.Uuid
+  email                String             @unique
+  passwordHash         String             @map("password_hash")
+  fullName             String             @map("full_name")
+  role                 Role               @default(EDITOR)
+  isActive             Boolean            @default(true) @map("is_active")
+  createdAt            DateTime           @default(now()) @map("created_at")
+  updatedAt            DateTime           @updatedAt @map("updated_at")
+  refreshTokens        RefreshToken[]
+  createdVillages      Village[]          @relation("VillageCreatedBy")
+  updatedVillages      Village[]          @relation("VillageUpdatedBy")
+  createdVillageNames  VillageName[]      @relation("VillageNameCreatedBy")
+  updatedVillageNames  VillageName[]      @relation("VillageNameUpdatedBy")
+  createdSources       Source[]           @relation("SourceCreatedBy")
+  updatedSources       Source[]           @relation("SourceUpdatedBy")
+  createdPopulation    PopulationRecord[] @relation("PopulationRecordCreatedBy")
+  updatedPopulation    PopulationRecord[] @relation("PopulationRecordUpdatedBy")
+  verifiedPopulation   PopulationRecord[] @relation("PopulationRecordVerifiedBy")
+  createdEvents        HistoricalEvent[]  @relation("HistoricalEventCreatedBy")
+  updatedEvents        HistoricalEvent[]  @relation("HistoricalEventUpdatedBy")
+  createdLandmarks     Landmark[]         @relation("LandmarkCreatedBy")
+  updatedLandmarks     Landmark[]         @relation("LandmarkUpdatedBy")
+  createdHeritageItems HeritageItem[]      @relation("HeritageItemCreatedBy")
+  updatedHeritageItems HeritageItem[]      @relation("HeritageItemUpdatedBy")
+  createdEconomies     EconomicActivity[] @relation("EconomicActivityCreatedBy")
+  updatedEconomies     EconomicActivity[] @relation("EconomicActivityUpdatedBy")
+  createdFacilities    Facility[]         @relation("FacilityCreatedBy")
+  updatedFacilities    Facility[]         @relation("FacilityUpdatedBy")
+  auditLogs            AuditLog[]
+  requestedChanges     ChangeRequest[]    @relation("ChangeRequestRequestedBy")
+  reviewedChanges      ChangeRequest[]    @relation("ChangeRequestReviewedBy")
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
+  revokedAt DateTime? @map("revoked_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  user      User      @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+model Governorate {
+  id               String           @id @default(uuid()) @db.Uuid
+  nameAr           String           @unique @map("name_ar")
+  nameEn           String           @unique @map("name_en")
+  code             String           @unique
+  createdAt        DateTime         @default(now()) @map("created_at")
+  updatedAt        DateTime         @updatedAt @map("updated_at")
+  localAuthorities LocalAuthority[]
+  villages         Village[]
+
+  @@map("governorates")
+}
+
+model LocalAuthority {
+  id            String             @id @default(uuid()) @db.Uuid
+  governorateId String             @map("governorate_id") @db.Uuid
+  nameAr        String             @map("name_ar")
+  nameEn        String?            @map("name_en")
+  type          LocalAuthorityType
+  sourceId      String?            @map("source_id") @db.Uuid
+  asOfYear      Int?               @map("as_of_year")
+  createdAt     DateTime           @default(now()) @map("created_at")
+  updatedAt     DateTime           @updatedAt @map("updated_at")
+  governorate   Governorate        @relation(fields: [governorateId], references: [id], onDelete: Restrict)
+  source        Source?            @relation(fields: [sourceId], references: [id], onDelete: Restrict)
+  villages      Village[]
+
+  @@unique([governorateId, nameAr])
+  @@index([governorateId])
+  @@index([sourceId])
+  @@map("local_authorities")
+}
+
+model Village {
+  id                  String             @id @default(uuid()) @db.Uuid
+  slug                String             @unique
+  pcbsCode            String?            @unique @map("pcbs_code")
+  nameAr              String             @map("name_ar")
+  nameEn              String?            @map("name_en")
+  governorateId       String             @map("governorate_id") @db.Uuid
+  localAuthorityId    String?            @map("local_authority_id") @db.Uuid
+  nameOrigin          String?            @map("name_origin")
+  nameOriginSourceId  String?            @map("name_origin_source_id") @db.Uuid
+  latitude            Decimal?           @db.Decimal(9, 6)
+  longitude           Decimal?           @db.Decimal(9, 6)
+  elevationM          Int?               @map("elevation_m")
+  areaDunums          Decimal?           @map("area_dunums") @db.Decimal
+  locationDescription String?            @map("location_description")
+  historicalOverview  String?            @map("historical_overview")
+  geoDisplayName      String?            @map("geo_display_name")
+  geoEnrichedAt       DateTime?          @map("geo_enriched_at")
+  verificationStatus  VerificationStatus @default(PENDING) @map("verification_status")
+  version             Int                @default(1)
+  createdById         String?            @map("created_by_id") @db.Uuid
+  updatedById         String?            @map("updated_by_id") @db.Uuid
+  deletedAt           DateTime?          @map("deleted_at")
+  createdAt           DateTime           @default(now()) @map("created_at")
+  updatedAt           DateTime           @updatedAt @map("updated_at")
+  governorate         Governorate        @relation(fields: [governorateId], references: [id], onDelete: Restrict)
+  localAuthority      LocalAuthority?    @relation(fields: [localAuthorityId], references: [id], onDelete: Restrict)
+  nameOriginSource    Source?            @relation("VillageNameOriginSource", fields: [nameOriginSourceId], references: [id], onDelete: Restrict)
+  createdBy           User?              @relation("VillageCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  updatedBy           User?              @relation("VillageUpdatedBy", fields: [updatedById], references: [id], onDelete: Restrict)
+  names               VillageName[]
+  nearbyPlaces        NearbyPlace[]      @relation("NearbyPlaceVillage")
+  relatedNearbyPlaces NearbyPlace[]      @relation("NearbyPlaceRelatedVillage")
+  populationRecords   PopulationRecord[]
+  historicalEvents    HistoricalEvent[]
+  landmarks           Landmark[]
+  heritageItems       HeritageItem[]
+  economicActivities  EconomicActivity[]
+  facilities          Facility[]
+
+  @@index([governorateId])
+  @@index([localAuthorityId])
+  @@index([nameOriginSourceId])
+  @@index([createdById])
+  @@index([updatedById])
+  @@map("villages")
+}
+
+model VillageName {
+  id                 String             @id @default(uuid()) @db.Uuid
+  villageId          String             @map("village_id") @db.Uuid
+  name               String
+  language           String
+  nameType           VillageNameType    @map("name_type")
+  periodFrom         Int?               @map("period_from")
+  periodTo           Int?               @map("period_to")
+  sourceId           String?            @map("source_id") @db.Uuid
+  verificationStatus VerificationStatus @default(PENDING) @map("verification_status")
+  version            Int                @default(1)
+  createdById        String?            @map("created_by_id") @db.Uuid
+  updatedById        String?            @map("updated_by_id") @db.Uuid
+  deletedAt          DateTime?          @map("deleted_at")
+  createdAt          DateTime           @default(now()) @map("created_at")
+  updatedAt          DateTime           @updatedAt @map("updated_at")
+  village            Village            @relation(fields: [villageId], references: [id], onDelete: Restrict)
+  source             Source?            @relation(fields: [sourceId], references: [id], onDelete: Restrict)
+  createdBy          User?              @relation("VillageNameCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  updatedBy          User?              @relation("VillageNameUpdatedBy", fields: [updatedById], references: [id], onDelete: Restrict)
+
+  @@index([villageId])
+  @@index([sourceId])
+  @@index([createdById])
+  @@index([updatedById])
+  @@map("village_names")
+}
+
+model NearbyPlace {
+  id               String        @id @default(uuid()) @db.Uuid
+  villageId        String        @map("village_id") @db.Uuid
+  relatedVillageId String?       @map("related_village_id") @db.Uuid
+  placeName        String        @map("place_name")
+  placeType        PlaceType     @map("place_type")
+  relation         PlaceRelation
+  distanceKm       Decimal?      @map("distance_km") @db.Decimal
+  createdAt        DateTime      @default(now()) @map("created_at")
+  updatedAt        DateTime      @updatedAt @map("updated_at")
+  village          Village       @relation("NearbyPlaceVillage", fields: [villageId], references: [id], onDelete: Restrict)
+  relatedVillage   Village?      @relation("NearbyPlaceRelatedVillage", fields: [relatedVillageId], references: [id], onDelete: Restrict)
+
+  @@unique([villageId, placeName])
+  @@index([villageId])
+  @@index([relatedVillageId])
+  @@map("nearby_places")
+}
+
+model Source {
+  id                   String             @id @default(uuid()) @db.Uuid
+  title                String
+  author               String?
+  publisher            String?
+  year                 Int?
+  url                  String?
+  sourceType           SourceType         @map("source_type")
+  citationText         String?            @map("citation_text")
+  verificationStatus   VerificationStatus @default(PENDING) @map("verification_status")
+  version              Int                @default(1)
+  createdById          String?            @map("created_by_id") @db.Uuid
+  updatedById          String?            @map("updated_by_id") @db.Uuid
+  deletedAt            DateTime?          @map("deleted_at")
+  createdAt            DateTime           @default(now()) @map("created_at")
+  updatedAt            DateTime           @updatedAt @map("updated_at")
+  createdBy            User?              @relation("SourceCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  updatedBy            User?              @relation("SourceUpdatedBy", fields: [updatedById], references: [id], onDelete: Restrict)
+  villagesByNameOrigin Village[]          @relation("VillageNameOriginSource")
+  localAuthorities      LocalAuthority[]
+  villageNames         VillageName[]
+  populationRecords    PopulationRecord[]
+  historicalEvents     HistoricalEvent[]
+  landmarks            Landmark[]
+  heritageItems        HeritageItem[]
+  economicActivities   EconomicActivity[]
+  facilities           Facility[]
+
+  @@index([createdById])
+  @@index([updatedById])
+  @@map("sources")
+}
+
+model PopulationRecord {
+  id                 String             @id @default(uuid()) @db.Uuid
+  villageId          String             @map("village_id") @db.Uuid
+  population         Int
+  referenceYear      Int                @map("reference_year")
+  referenceDate      DateTime?          @map("reference_date")
+  sourceId           String             @map("source_id") @db.Uuid
+  isEstimate         Boolean            @default(false) @map("is_estimate")
+  isPreferred        Boolean            @default(false) @map("is_preferred")
+  needsReview        Boolean            @default(false) @map("needs_review")
+  notes              String?
+  verifiedById       String?            @map("verified_by_id") @db.Uuid
+  verifiedAt         DateTime?          @map("verified_at")
+  verificationStatus VerificationStatus @default(PENDING) @map("verification_status")
+  version            Int                @default(1)
+  createdById        String?            @map("created_by_id") @db.Uuid
+  updatedById        String?            @map("updated_by_id") @db.Uuid
+  deletedAt          DateTime?          @map("deleted_at")
+  createdAt          DateTime           @default(now()) @map("created_at")
+  updatedAt          DateTime           @updatedAt @map("updated_at")
+  village            Village            @relation(fields: [villageId], references: [id], onDelete: Restrict)
+  source             Source             @relation(fields: [sourceId], references: [id], onDelete: Restrict)
+  verifiedBy         User?              @relation("PopulationRecordVerifiedBy", fields: [verifiedById], references: [id], onDelete: Restrict)
+  createdBy          User?              @relation("PopulationRecordCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  updatedBy          User?              @relation("PopulationRecordUpdatedBy", fields: [updatedById], references: [id], onDelete: Restrict)
+
+  @@unique([villageId, referenceYear, sourceId])
+  @@index([villageId])
+  @@index([sourceId])
+  @@index([verifiedById])
+  @@index([createdById])
+  @@index([updatedById])
+  @@map("population_records")
+}
+
+model HistoricalEvent {
+  id                 String             @id @default(uuid()) @db.Uuid
+  villageId          String             @map("village_id") @db.Uuid
+  title              String
+  description        String?
+  eventYear          Int?               @map("event_year")
+  eventDate          DateTime?          @map("event_date")
+  isApproximate      Boolean            @default(false) @map("is_approximate")
+  category           String?
+  sourceId           String?            @map("source_id") @db.Uuid
+  verificationStatus VerificationStatus @default(PENDING) @map("verification_status")
+  version            Int                @default(1)
+  createdById        String?            @map("created_by_id") @db.Uuid
+  updatedById        String?            @map("updated_by_id") @db.Uuid
+  deletedAt          DateTime?          @map("deleted_at")
+  createdAt          DateTime           @default(now()) @map("created_at")
+  updatedAt          DateTime           @updatedAt @map("updated_at")
+  village            Village            @relation(fields: [villageId], references: [id], onDelete: Restrict)
+  source             Source?            @relation(fields: [sourceId], references: [id], onDelete: Restrict)
+  createdBy          User?              @relation("HistoricalEventCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  updatedBy          User?              @relation("HistoricalEventUpdatedBy", fields: [updatedById], references: [id], onDelete: Restrict)
+
+  @@index([villageId])
+  @@index([sourceId])
+  @@index([createdById])
+  @@index([updatedById])
+  @@map("historical_events")
+}
+
+model Landmark {
+  id                 String             @id @default(uuid()) @db.Uuid
+  villageId          String             @map("village_id") @db.Uuid
+  nameAr             String             @map("name_ar")
+  nameEn             String?            @map("name_en")
+  landmarkType       LandmarkType       @map("landmark_type")
+  description        String?
+  latitude           Decimal?           @db.Decimal(9, 6)
+  longitude          Decimal?           @db.Decimal(9, 6)
+  sourceId           String?            @map("source_id") @db.Uuid
+  verificationStatus VerificationStatus @default(PENDING) @map("verification_status")
+  version            Int                @default(1)
+  createdById        String?            @map("created_by_id") @db.Uuid
+  updatedById        String?            @map("updated_by_id") @db.Uuid
+  deletedAt          DateTime?          @map("deleted_at")
+  createdAt          DateTime           @default(now()) @map("created_at")
+  updatedAt          DateTime           @updatedAt @map("updated_at")
+  village            Village            @relation(fields: [villageId], references: [id], onDelete: Restrict)
+  source             Source?            @relation(fields: [sourceId], references: [id], onDelete: Restrict)
+  createdBy          User?              @relation("LandmarkCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  updatedBy          User?              @relation("LandmarkUpdatedBy", fields: [updatedById], references: [id], onDelete: Restrict)
+
+  @@index([villageId])
+  @@index([sourceId])
+  @@index([createdById])
+  @@index([updatedById])
+  @@map("landmarks")
+}
+
+model HeritageItem {
+  id                 String             @id @default(uuid()) @db.Uuid
+  villageId          String             @map("village_id") @db.Uuid
+  category           HeritageCategory
+  name               String
+  description        String?
+  sourceId           String?            @map("source_id") @db.Uuid
+  verificationStatus VerificationStatus @default(PENDING) @map("verification_status")
+  version            Int                @default(1)
+  createdById        String?            @map("created_by_id") @db.Uuid
+  updatedById        String?            @map("updated_by_id") @db.Uuid
+  deletedAt          DateTime?          @map("deleted_at")
+  createdAt          DateTime           @default(now()) @map("created_at")
+  updatedAt          DateTime           @updatedAt @map("updated_at")
+  village            Village            @relation(fields: [villageId], references: [id], onDelete: Restrict)
+  source             Source?            @relation(fields: [sourceId], references: [id], onDelete: Restrict)
+  createdBy          User?              @relation("HeritageItemCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  updatedBy          User?              @relation("HeritageItemUpdatedBy", fields: [updatedById], references: [id], onDelete: Restrict)
+
+  @@index([villageId])
+  @@index([sourceId])
+  @@index([createdById])
+  @@index([updatedById])
+  @@map("heritage_items")
+}
+
+model EconomicActivity {
+  id                 String             @id @default(uuid()) @db.Uuid
+  villageId          String             @map("village_id") @db.Uuid
+  category           EconomicCategory
+  name               String
+  description        String?
+  isMajor            Boolean            @default(false) @map("is_major")
+  sourceId           String?            @map("source_id") @db.Uuid
+  asOfYear           Int?               @map("as_of_year")
+  verificationStatus VerificationStatus @default(PENDING) @map("verification_status")
+  version            Int                @default(1)
+  createdById        String?            @map("created_by_id") @db.Uuid
+  updatedById        String?            @map("updated_by_id") @db.Uuid
+  deletedAt          DateTime?          @map("deleted_at")
+  createdAt          DateTime           @default(now()) @map("created_at")
+  updatedAt          DateTime           @updatedAt @map("updated_at")
+  village            Village            @relation(fields: [villageId], references: [id], onDelete: Restrict)
+  source             Source?            @relation(fields: [sourceId], references: [id], onDelete: Restrict)
+  createdBy          User?              @relation("EconomicActivityCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  updatedBy          User?              @relation("EconomicActivityUpdatedBy", fields: [updatedById], references: [id], onDelete: Restrict)
+
+  @@index([villageId])
+  @@index([sourceId])
+  @@index([createdById])
+  @@index([updatedById])
+  @@map("economic_activities")
+}
+
+model Facility {
+  id                 String             @id @default(uuid()) @db.Uuid
+  villageId          String             @map("village_id") @db.Uuid
+  facilityType       FacilityType       @map("facility_type")
+  name               String
+  description        String?
+  latitude           Decimal?           @db.Decimal(9, 6)
+  longitude          Decimal?           @db.Decimal(9, 6)
+  sourceId           String?            @map("source_id") @db.Uuid
+  asOfYear           Int?               @map("as_of_year")
+  verificationStatus VerificationStatus @default(PENDING) @map("verification_status")
+  version            Int                @default(1)
+  createdById        String?            @map("created_by_id") @db.Uuid
+  updatedById        String?            @map("updated_by_id") @db.Uuid
+  deletedAt          DateTime?          @map("deleted_at")
+  createdAt          DateTime           @default(now()) @map("created_at")
+  updatedAt          DateTime           @updatedAt @map("updated_at")
+  village            Village            @relation(fields: [villageId], references: [id], onDelete: Restrict)
+  source             Source?            @relation(fields: [sourceId], references: [id], onDelete: Restrict)
+  createdBy          User?              @relation("FacilityCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  updatedBy          User?              @relation("FacilityUpdatedBy", fields: [updatedById], references: [id], onDelete: Restrict)
+
+  @@index([villageId])
+  @@index([sourceId])
+  @@index([createdById])
+  @@index([updatedById])
+  @@map("facilities")
+}
+
+model AuditLog {
+  id         String      @id @default(uuid()) @db.Uuid
+  entityType String      @map("entity_type")
+  entityId   String      @map("entity_id")
+  action     AuditAction
+  actorId    String?     @map("actor_id") @db.Uuid
+  before     Json?
+  after      Json?
+  requestId  String?     @map("request_id")
+  createdAt  DateTime    @default(now()) @map("created_at")
+  actor      User?       @relation(fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@index([actorId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model ChangeRequest {
+  id              String              @id @default(uuid()) @db.Uuid
+  entityType      String              @map("entity_type")
+  entityId        String              @map("entity_id")
+  baseVersion     Int                 @map("base_version")
+  proposedChanges Json                @map("proposed_changes")
+  reason          String?
+  status          ChangeRequestStatus @default(PENDING)
+  requestedById   String              @map("requested_by_id") @db.Uuid
+  reviewedById    String?             @map("reviewed_by_id") @db.Uuid
+  reviewComment   String?             @map("review_comment")
+  createdAt       DateTime            @default(now()) @map("created_at")
+  updatedAt       DateTime            @updatedAt @map("updated_at")
+  reviewedAt      DateTime?           @map("reviewed_at")
+  requestedBy     User                @relation("ChangeRequestRequestedBy", fields: [requestedById], references: [id], onDelete: Restrict)
+  reviewedBy      User?               @relation("ChangeRequestReviewedBy", fields: [reviewedById], references: [id], onDelete: Restrict)
+
+  @@index([requestedById])
+  @@index([reviewedById])
+  @@index([status])
+  @@map("change_requests")
 }
