@@ -19,6 +19,7 @@ export function createApp(): express.Express {
   app.use(
     pinoHttp({
       logger,
+      redact: ['req.headers.authorization'],
       genReqId: (req) => (req as express.Request).requestId,
       customLogLevel: (_req, res, err) => {
         if (err || res.statusCode >= 500) return 'error';

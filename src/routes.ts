@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { authRouter } from './modules/auth/auth.routes.js';
 import { redis } from './shared/cache.js';
 import { prisma } from './shared/db.js';
 
@@ -36,5 +37,4 @@ router.get('/health', async (_req, res) => {
   });
 });
 
-// Feature module routers are mounted here as they are implemented, e.g.:
-// router.use('/villages', villagesRouter);
+router.use('/auth', authRouter);
