@@ -12,6 +12,9 @@ const envSchema = z.object({
   REDIS_URL: z
     .string({ error: 'REDIS_URL is required' })
     .regex(/^rediss?:\/\/.+/, 'must be a redis:// or rediss:// URL'),
+  JWT_ACCESS_SECRET: z.string({ error: 'JWT_ACCESS_SECRET is required' }).min(32),
+  JWT_ACCESS_TTL: z.string().default('15m'),
+  JWT_REFRESH_TTL_DAYS: z.coerce.number().int().positive().default(7),
   // Comma-separated list of allowed origins, or "*" to allow any origin.
   CORS_ORIGINS: z
     .string()
