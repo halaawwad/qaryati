@@ -22,6 +22,7 @@ import {
   type VillageWriteData,
   type VillageWriteRepository,
 } from './villages.repository.js';
+import { unprocessable, versionConflict, villageNotFound } from './villages.errors.js';
 import type {
   CreateVillageInput,
   ListVillagesQuery,
@@ -89,20 +90,6 @@ function toNearbyPlace(row: NearbyPlaceRow, villageId: string): NearbyPlace {
     placeType: PlaceType.VILLAGE,
     village: activeVillage(row.village),
   };
-}
-
-function villageNotFound(): NotFoundError {
-  return new NotFoundError('Village not found');
-}
-
-function versionConflict(currentVersion: number): AppError {
-  return new AppError(409, 'VERSION_CONFLICT', 'The village was changed by someone else; reload it and retry', [
-    { field: 'version', message: `Current version is ${currentVersion}` },
-  ]);
-}
-
-function unprocessable(code: string, field: string, message: string): AppError {
-  return new AppError(422, code, message, [{ field, message }]);
 }
 
 // The unique constraints are the real guard against duplicates (a pre-check would race with a
