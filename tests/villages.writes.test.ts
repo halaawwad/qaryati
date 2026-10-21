@@ -165,6 +165,47 @@ class FakeVillageStore implements VillageRepository, VillageWriteRepository {
     row.updatedById = updatedById;
     return 1;
   }
+
+  // Names and nearby places are covered by tests/village-relations.test.ts.
+  async findNameById(): Promise<never> {
+    throw new Error('not used');
+  }
+
+  async nameTaken(): Promise<never> {
+    throw new Error('not used');
+  }
+
+  async createName(): Promise<never> {
+    throw new Error('not used');
+  }
+
+  async updateNameIfVersion(): Promise<never> {
+    throw new Error('not used');
+  }
+
+  async softDeleteName(): Promise<never> {
+    throw new Error('not used');
+  }
+
+  async findNearbyById(): Promise<never> {
+    throw new Error('not used');
+  }
+
+  async findRelationBetween(): Promise<never> {
+    throw new Error('not used');
+  }
+
+  async placeNameTaken(): Promise<never> {
+    throw new Error('not used');
+  }
+
+  async createNearby(): Promise<never> {
+    throw new Error('not used');
+  }
+
+  async deleteNearby(): Promise<never> {
+    throw new Error('not used');
+  }
 }
 
 class FakeAudit implements AuditRecorder {
