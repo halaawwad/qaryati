@@ -3,14 +3,20 @@ import { Router } from 'express';
 import { authenticate } from '../../shared/middlewares/authenticate.js';
 import { requireRole } from '../../shared/middlewares/requireRole.js';
 import { validate } from '../../shared/middlewares/validate.js';
+import * as relations from './village-relations.controller.js';
 import * as controller from './villages.controller.js';
 import {
+  createNearbyPlaceBodySchema,
   createVillageBodySchema,
+  createVillageNameBodySchema,
   listVillagesQuerySchema,
+  nearbyRelationParamsSchema,
   nearbyVillagesQuerySchema,
   updateVillageBodySchema,
+  updateVillageNameBodySchema,
   villageDetailsParamsSchema,
   villageIdParamsSchema,
+  villageNameParamsSchema,
   villageVersionBodySchema,
 } from './villages.schemas.js';
 
@@ -61,4 +67,41 @@ villagesRouter.post(
   requireRole(...REVIEWERS),
   validate({ params: villageIdParamsSchema, body: villageVersionBodySchema }),
   controller.reject,
+);
+
+villagesRouter.post(
+  '/:id/names',
+  authenticate,
+  requireRole(...EDITORS),
+  validate({ params: villageIdParamsSchema, body: createVillageNameBodySchema }),
+  relations.addName,
+);
+villagesRouter.patch(
+  '/:id/names/:nameId',
+  authenticate,
+  requireRole(...EDITORS),
+  validate({ params: villageNameParamsSchema, body: updateVillageNameBodySchema }),
+  relations.updateName,
+);
+villagesRouter.delete(
+  '/:id/names/:nameId',
+  authenticate,
+  requireRole(...REVIEWERS),
+  validate({ params: villageNameParamsSchema }),
+  relations.removeName,
+);
+
+villagesRouter.post(
+  '/:id/nearby',
+  authenticate,
+  requireRole(...EDITORS),
+  validate({ params: villageIdParamsSchema, body: createNearbyPlaceBodySchema }),
+  relations.addNearby,
+);
+villagesRouter.delete(
+  '/:id/nearby/:relationId',
+  authenticate,
+  requireRole(...REVIEWERS),
+  validate({ params: nearbyRelationParamsSchema }),
+  relations.removeNearby,
 );

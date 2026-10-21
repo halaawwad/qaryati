@@ -1,6 +1,7 @@
 import type {
   Governorate,
   LocalAuthority,
+  NearbyPlace as NearbyPlaceRecord,
   PlaceRelation,
   PlaceType,
   Prisma,
@@ -8,6 +9,7 @@ import type {
   VerificationStatus,
   Village,
   VillageName,
+  VillageNameType,
 } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
 import type { SortOrder, VillageSortField } from './villages.schemas.js';
@@ -125,6 +127,34 @@ export type VillageCreateData = VillageWriteData & {
 
 export type VillageChanges = VillageWriteData & { verificationStatus: VerificationStatus };
 
+export interface VillageNameWriteData {
+  name?: string;
+  language?: string;
+  nameType?: VillageNameType;
+  periodFrom?: number | null;
+  periodTo?: number | null;
+  sourceId?: string | null;
+}
+
+export type VillageNameCreateData = VillageNameWriteData & {
+  villageId: string;
+  name: string;
+  language: string;
+  nameType: VillageNameType;
+  createdById: string;
+};
+
+export type VillageNameChanges = VillageNameWriteData & { verificationStatus: VerificationStatus };
+
+export interface NearbyPlaceCreateData {
+  villageId: string;
+  relatedVillageId: string | null;
+  placeName: string;
+  placeType: PlaceType;
+  relation: PlaceRelation;
+  distanceKm: number | null;
+}
+
 /** Write-side queries, always bound to one transaction. */
 export interface VillageWriteRepository {
   /** The full row, including soft-deleted ones; used for checks and as the audit snapshot. */
@@ -142,6 +172,23 @@ export interface VillageWriteRepository {
   updateIfVersion(id: string, expectedVersion: number, changes: VillageChanges, updatedById: string): Promise<number>;
   /** Sets deletedAt unless the row is already deleted. Returns the number of rows changed (0 or 1). */
   softDelete(id: string, updatedById: string): Promise<number>;
+
+  /** The full village_names row, including soft-deleted ones. */
+  findNameById(id: string): Promise<VillageName | null>;
+  /** True when the village already has a non-deleted name with this text and language (case-insensitive). */
+  nameTaken(villageId: string, name: string, language: string, exceptId?: string): Promise<boolean>;
+  createName(data: VillageNameCreateData): Promise<VillageName>;
+  /** Same contract as updateIfVersion, for village_names. */
+  updateNameIfVersion(id: string, expectedVersion: number, changes: VillageNameChanges, updatedById: string): Promise<number>;
+  softDeleteName(id: string, updatedById: string): Promise<number>;
+
+  findNearbyById(id: string): Promise<NearbyPlaceRecord | null>;
+  /** A relation between the two villages stored in either direction, or null. */
+  findRelationBetween(villageId: string, otherVillageId: string): Promise<NearbyPlaceRecord | null>;
+  placeNameTaken(villageId: string, placeName: string): Promise<boolean>;
+  createNearby(data: NearbyPlaceCreateData): Promise<NearbyPlaceRecord>;
+  /** Hard delete. Returns the number of rows removed (0 or 1). */
+  deleteNearby(id: string): Promise<number>;
 }
 
 export interface VillageRepository {
@@ -308,6 +355,80 @@ function buildWriteRepository(tx: Prisma.TransactionClient): VillageWriteReposit
         data: { deletedAt: new Date(), updatedById },
       });
 
+      return result.count;
+    },
+
+    findNameById(id) {
+      return tx.villageName.findUnique({ where: { id } });
+    },
+
+    async nameTaken(villageId, name, language, exceptId) {
+      const row = await tx.villageName.findFirst({
+        where: {
+          villageId,
+          language,
+          deletedAt: null,
+          name: { equals: name, mode: 'insensitive' },
+          ...(exceptId ? { id: { not: exceptId } } : {}),
+        },
+        select: { id: true },
+      });
+
+      return row !== null;
+    },
+
+    createName(data) {
+      return tx.villageName.create({ data });
+    },
+
+    async updateNameIfVersion(id, expectedVersion, changes, updatedById) {
+      const result = await tx.villageName.updateMany({
+        where: { id, version: expectedVersion, deletedAt: null },
+        data: { ...changes, updatedById, version: { increment: 1 } },
+      });
+
+      return result.count;
+    },
+
+    async softDeleteName(id, updatedById) {
+      const result = await tx.villageName.updateMany({
+        where: { id, deletedAt: null },
+        data: { deletedAt: new Date(), updatedById },
+      });
+
+      return result.count;
+    },
+
+    findNearbyById(id) {
+      return tx.nearbyPlace.findUnique({ where: { id } });
+    },
+
+    findRelationBetween(villageId, otherVillageId) {
+      return tx.nearbyPlace.findFirst({
+        where: {
+          OR: [
+            { villageId, relatedVillageId: otherVillageId },
+            { villageId: otherVillageId, relatedVillageId: villageId },
+          ],
+        },
+      });
+    },
+
+    async placeNameTaken(villageId, placeName) {
+      const row = await tx.nearbyPlace.findUnique({
+        where: { villageId_placeName: { villageId, placeName } },
+        select: { id: true },
+      });
+
+      return row !== null;
+    },
+
+    createNearby(data) {
+      return tx.nearbyPlace.create({ data });
+    },
+
+    async deleteNearby(id) {
+      const result = await tx.nearbyPlace.deleteMany({ where: { id } });
       return result.count;
     },
   };
