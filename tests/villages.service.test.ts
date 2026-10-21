@@ -33,6 +33,11 @@ class FakeVillageRepository implements VillageRepository {
   withinRadius: VillageWithinRadius[] = [];
   lastRadiusSearch: RadiusSearch | undefined;
 
+  // Writes are covered by tests/villages.writes.test.ts.
+  async transaction<T>(): Promise<T> {
+    throw new Error('transaction is not used by the read tests');
+  }
+
   async findMany(params: VillageListParams): Promise<{ items: VillageListItem[]; total: number }> {
     this.lastParams = params;
     return { items: this.items, total: this.total };
