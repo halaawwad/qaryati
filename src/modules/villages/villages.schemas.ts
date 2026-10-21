@@ -25,7 +25,14 @@ export const villageDetailsParamsSchema = z.object({
   idOrSlug: z.string().trim().min(1).max(200),
 });
 
+export const MAX_NEARBY_RADIUS_KM = 50;
+
+export const nearbyVillagesQuerySchema = z.object({
+  radiusKm: z.coerce.number().positive().max(MAX_NEARBY_RADIUS_KM).optional(),
+});
+
 export type ListVillagesQuery = z.infer<typeof listVillagesQuerySchema>;
 export type VillageDetailsParams = z.infer<typeof villageDetailsParamsSchema>;
+export type NearbyVillagesQuery = z.infer<typeof nearbyVillagesQuerySchema>;
 export type VillageSortField = (typeof VILLAGE_SORT_FIELDS)[number];
 export type SortOrder = 'asc' | 'desc';
