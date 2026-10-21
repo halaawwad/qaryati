@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { authRouter } from './modules/auth/auth.routes.js';
+import { governoratesRouter } from './modules/governorates/governorates.routes.js';
 import { villagesRouter } from './modules/villages/villages.routes.js';
 import { redis } from './shared/cache.js';
 import { prisma } from './shared/db.js';
@@ -39,4 +40,5 @@ router.get('/health', async (_req, res) => {
 });
 
 router.use('/auth', authRouter);
+router.use('/governorates', governoratesRouter);
 router.use('/villages', villagesRouter);
