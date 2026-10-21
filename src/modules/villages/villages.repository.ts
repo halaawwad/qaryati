@@ -98,7 +98,55 @@ export interface VillageListParams {
   take: number;
 }
 
+/** Columns a client may set on create/update. Server-owned columns are added by the service/repository. */
+export interface VillageWriteData {
+  slug?: string;
+  pcbsCode?: string | null;
+  nameAr?: string;
+  nameEn?: string | null;
+  governorateId?: string;
+  localAuthorityId?: string | null;
+  nameOrigin?: string | null;
+  nameOriginSourceId?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  elevationM?: number | null;
+  areaDunums?: number | null;
+  locationDescription?: string | null;
+  historicalOverview?: string | null;
+}
+
+export type VillageCreateData = VillageWriteData & {
+  slug: string;
+  nameAr: string;
+  governorateId: string;
+  createdById: string;
+};
+
+export type VillageChanges = VillageWriteData & { verificationStatus: VerificationStatus };
+
+/** Write-side queries, always bound to one transaction. */
+export interface VillageWriteRepository {
+  /** The full row, including soft-deleted ones; used for checks and as the audit snapshot. */
+  findById(id: string): Promise<Village | null>;
+  governorateExists(id: string): Promise<boolean>;
+  /** The local authority's governorate id, or null when the local authority does not exist. */
+  findLocalAuthorityGovernorateId(id: string): Promise<string | null>;
+  /** True for a source that exists and is not soft-deleted. */
+  sourceExists(id: string): Promise<boolean>;
+  create(data: VillageCreateData): Promise<Village>;
+  /**
+   * Applies the changes only while the row is still at expectedVersion and not deleted, bumping
+   * version and setting updatedById. Returns the number of rows changed (0 or 1).
+   */
+  updateIfVersion(id: string, expectedVersion: number, changes: VillageChanges, updatedById: string): Promise<number>;
+  /** Sets deletedAt unless the row is already deleted. Returns the number of rows changed (0 or 1). */
+  softDelete(id: string, updatedById: string): Promise<number>;
+}
+
 export interface VillageRepository {
+  /** Runs fn in one database transaction; tx is passed along so audit rows commit with the change. */
+  transaction<T>(fn: (writes: VillageWriteRepository, tx: Prisma.TransactionClient) => Promise<T>): Promise<T>;
   findMany(params: VillageListParams): Promise<{ items: VillageListItem[]; total: number }>;
   /** Returns null when the village does not exist or is soft-deleted. */
   findDetails(lookup: VillageLookup): Promise<VillageDetails | null>;
@@ -220,7 +268,56 @@ function buildOrderBy({ field, order }: VillageListParams['sort']): Prisma.Villa
   return [primary, { id: 'asc' }];
 }
 
+function buildWriteRepository(tx: Prisma.TransactionClient): VillageWriteRepository {
+  return {
+    findById(id) {
+      return tx.village.findUnique({ where: { id } });
+    },
+
+    async governorateExists(id) {
+      const row = await tx.governorate.findUnique({ where: { id }, select: { id: true } });
+      return row !== null;
+    },
+
+    async findLocalAuthorityGovernorateId(id) {
+      const row = await tx.localAuthority.findUnique({ where: { id }, select: { governorateId: true } });
+      return row?.governorateId ?? null;
+    },
+
+    async sourceExists(id) {
+      const row = await tx.source.findFirst({ where: { id, deletedAt: null }, select: { id: true } });
+      return row !== null;
+    },
+
+    create(data) {
+      return tx.village.create({ data });
+    },
+
+    async updateIfVersion(id, expectedVersion, changes, updatedById) {
+      const result = await tx.village.updateMany({
+        where: { id, version: expectedVersion, deletedAt: null },
+        data: { ...changes, updatedById, version: { increment: 1 } },
+      });
+
+      return result.count;
+    },
+
+    async softDelete(id, updatedById) {
+      const result = await tx.village.updateMany({
+        where: { id, deletedAt: null },
+        data: { deletedAt: new Date(), updatedById },
+      });
+
+      return result.count;
+    },
+  };
+}
+
 export const villageRepository: VillageRepository = {
+  transaction(fn) {
+    return prisma.$transaction((tx) => fn(buildWriteRepository(tx), tx));
+  },
+
   async findMany(params) {
     const where = buildWhere(params.filters);
 
