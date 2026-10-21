@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { listVillagesQuerySchema } from '../src/modules/villages/villages.schemas.js';
+import { listVillagesQuerySchema, nearbyVillagesQuerySchema } from '../src/modules/villages/villages.schemas.js';
 import { parsePagination } from '../src/shared/pagination.js';
 
 describe('listVillagesQuerySchema', () => {
@@ -30,5 +30,19 @@ describe('listVillagesQuerySchema', () => {
 
     expect(result.success).toBe(true);
     expect(result.data).toEqual({ page: 2, limit: 5, search: undefined });
+  });
+});
+
+describe('nearbyVillagesQuerySchema', () => {
+  it.each(['-1', '0', '51', 'abc'])('rejects radiusKm=%s', (radiusKm) => {
+    const result = nearbyVillagesQuerySchema.safeParse({ radiusKm });
+
+    expect(result.success).toBe(false);
+    expect(result.error?.issues[0]?.path).toEqual(['radiusKm']);
+  });
+
+  it('coerces a valid radiusKm and allows it to be omitted', () => {
+    expect(nearbyVillagesQuerySchema.parse({ radiusKm: '2.5' })).toEqual({ radiusKm: 2.5 });
+    expect(nearbyVillagesQuerySchema.parse({})).toEqual({});
   });
 });

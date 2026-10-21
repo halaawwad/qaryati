@@ -1,11 +1,15 @@
-import { VerificationStatus, VillageNameType } from '@prisma/client';
+import { PlaceRelation, PlaceType, VerificationStatus, VillageNameType } from '@prisma/client';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
+  NearbyPlaceRow,
+  RadiusSearch,
   VillageDetails,
   VillageListItem,
   VillageListParams,
+  VillageLocation,
   VillageLookup,
   VillageRepository,
+  VillageWithinRadius,
 } from '../src/modules/villages/villages.repository.js';
 import type { VillageService } from '../src/modules/villages/villages.service.js';
 import { NotFoundError } from '../src/shared/errors.js';
@@ -25,6 +29,9 @@ class FakeVillageRepository implements VillageRepository {
   villages: StoredVillage[] = [];
   lastLookup: VillageLookup | undefined;
   existsCalls = 0;
+  nearbyRows: NearbyPlaceRow[] = [];
+  withinRadius: VillageWithinRadius[] = [];
+  lastRadiusSearch: RadiusSearch | undefined;
 
   async findMany(params: VillageListParams): Promise<{ items: VillageListItem[]; total: number }> {
     this.lastParams = params;
@@ -46,6 +53,26 @@ class FakeVillageRepository implements VillageRepository {
     this.existsCalls += 1;
     return this.villages.some((stored) => stored.id === id && !stored.deletedAt);
   }
+
+  async findLocation(lookup: VillageLookup): Promise<VillageLocation | null> {
+    const details = await this.findDetails(lookup);
+    return details ? { id: details.id, latitude: details.latitude, longitude: details.longitude } : null;
+  }
+
+  async findNearbyPlaceRows(villageId: string): Promise<NearbyPlaceRow[]> {
+    return this.nearbyRows.filter(
+      (row) => row.villageId === villageId || (row.relatedVillageId === villageId && !row.village.deletedAt),
+    );
+  }
+
+  async findVillagesWithinRadius(search: RadiusSearch): Promise<VillageWithinRadius[]> {
+    this.lastRadiusSearch = search;
+    return this.withinRadius;
+  }
+}
+
+function villageRef(id: string, slug: string, nameAr: string, deletedAt: Date | null = null) {
+  return { id, slug, nameAr, nameEn: null, deletedAt };
 }
 
 function storedVillage(id: string, slug: string, deletedAt: Date | null = null): StoredVillage {
@@ -232,5 +259,116 @@ describe('VillageService details', () => {
 
     await expect(service.ensureExists('test-village')).rejects.toBeInstanceOf(NotFoundError);
     expect(repo.existsCalls).toBe(2);
+  });
+});
+
+describe('VillageService nearby', () => {
+  const otherId = '55555555-5555-4555-8555-555555555555';
+  const deletedOtherId = '66666666-6666-4666-8666-666666666666';
+  let repo: FakeVillageRepository;
+
+  beforeEach(() => {
+    repo = new FakeVillageRepository();
+    const located = storedVillage(villageId, 'test-village');
+    located.latitude = 32.2;
+    located.longitude = 35.3;
+    repo.villages.push(
+      located,
+      storedVillage(otherId, 'other-village'),
+      storedVillage(deletedVillageId, 'deleted-village', new Date('2026-02-01T00:00:00Z')),
+    );
+  });
+
+  it('returns relations recorded on the village, with a deleted related village as null', async () => {
+    repo.nearbyRows.push(
+      {
+        villageId,
+        relatedVillageId: otherId,
+        placeName: 'Other Village',
+        placeType: PlaceType.VILLAGE,
+        relation: PlaceRelation.ADJACENT,
+        distanceKm: 1.5,
+        village: villageRef(villageId, 'test-village', 'قرية اختبار'),
+        relatedVillage: villageRef(otherId, 'other-village', 'قرية ثانية'),
+      },
+      {
+        villageId,
+        relatedVillageId: deletedOtherId,
+        placeName: 'Hidden Village',
+        placeType: PlaceType.VILLAGE,
+        relation: PlaceRelation.NEARBY,
+        distanceKm: null,
+        village: villageRef(villageId, 'test-village', 'قرية اختبار'),
+        relatedVillage: villageRef(deletedOtherId, 'hidden-village', 'قرية محذوفة', new Date()),
+      },
+    );
+
+    await expect(new Service(repo).listNearby('test-village', {})).resolves.toEqual([
+      {
+        placeName: 'Other Village',
+        placeType: PlaceType.VILLAGE,
+        relation: PlaceRelation.ADJACENT,
+        distanceKm: 1.5,
+        village: { id: otherId, slug: 'other-village', nameAr: 'قرية ثانية', nameEn: null },
+      },
+      {
+        placeName: 'Hidden Village',
+        placeType: PlaceType.VILLAGE,
+        relation: PlaceRelation.NEARBY,
+        distanceKm: null,
+        village: null,
+      },
+    ]);
+  });
+
+  it('names the other village when the relation was recorded in the reverse direction', async () => {
+    repo.nearbyRows.push({
+      villageId: otherId,
+      relatedVillageId: villageId,
+      placeName: 'Test Village',
+      placeType: PlaceType.VILLAGE,
+      relation: PlaceRelation.NEARBY,
+      distanceKm: 3,
+      village: villageRef(otherId, 'other-village', 'قرية ثانية'),
+      relatedVillage: villageRef(villageId, 'test-village', 'قرية اختبار'),
+    });
+
+    await expect(new Service(repo).listNearby(villageId, {})).resolves.toEqual([
+      {
+        placeName: 'قرية ثانية',
+        placeType: PlaceType.VILLAGE,
+        relation: PlaceRelation.NEARBY,
+        distanceKm: 3,
+        village: { id: otherId, slug: 'other-village', nameAr: 'قرية ثانية', nameEn: null },
+      },
+    ]);
+  });
+
+  it('passes radiusKm and the village coordinates to the repository', async () => {
+    repo.withinRadius = [{ id: otherId, slug: 'other-village', nameAr: 'قرية ثانية', nameEn: null, distanceKm: 2.34 }];
+
+    const result = await new Service(repo).listNearby('test-village', { radiusKm: 5 });
+
+    expect(repo.lastRadiusSearch).toEqual({ villageId, latitude: 32.2, longitude: 35.3, radiusKm: 5 });
+    expect(result).toEqual(repo.withinRadius);
+  });
+
+  it('returns 422 VILLAGE_HAS_NO_COORDINATES when radiusKm is used on a village without coordinates', async () => {
+    await expect(new Service(repo).listNearby('other-village', { radiusKm: 5 })).rejects.toMatchObject({
+      statusCode: 422,
+      code: 'VILLAGE_HAS_NO_COORDINATES',
+    });
+    expect(repo.lastRadiusSearch).toBeUndefined();
+  });
+
+  it('throws NotFoundError for an unknown village in both modes', async () => {
+    const service = new Service(repo);
+
+    await expect(service.listNearby('unknown-slug', {})).rejects.toBeInstanceOf(NotFoundError);
+    await expect(service.listNearby(missingVillageId, { radiusKm: 5 })).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it('throws NotFoundError for a soft-deleted village', async () => {
+    await expect(new Service(repo).listNearby('deleted-village', {})).rejects.toBeInstanceOf(NotFoundError);
   });
 });
