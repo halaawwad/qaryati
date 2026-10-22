@@ -17,7 +17,9 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
-    "db:seed": "tsx --env-file-if-exists=.env prisma/seed.ts"
+    "db:seed": "tsx --env-file-if-exists=.env prisma/seed.ts",
+    "perf:data": "tsx --env-file-if-exists=.env k6/data/generate-villages.ts",
+    "perf:clean": "tsx --env-file-if-exists=.env k6/data/cleanup-villages.ts"
   },
   "dependencies": {
     "@prisma/client": "6.19.3",
