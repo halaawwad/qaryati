@@ -20,6 +20,12 @@ export const listVillagesQuerySchema = z.object({
   order: z.enum(['asc', 'desc']).optional(),
 });
 
+// Format is not restricted: an unknown slug is a 404, not a validation error.
+export const villageDetailsParamsSchema = z.object({
+  idOrSlug: z.string().trim().min(1).max(200),
+});
+
 export type ListVillagesQuery = z.infer<typeof listVillagesQuerySchema>;
+export type VillageDetailsParams = z.infer<typeof villageDetailsParamsSchema>;
 export type VillageSortField = (typeof VILLAGE_SORT_FIELDS)[number];
 export type SortOrder = 'asc' | 'desc';
