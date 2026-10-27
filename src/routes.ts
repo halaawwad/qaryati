@@ -4,6 +4,7 @@ import { eventsRouter, villageEventsRouter } from './modules/events/events.route
 import { governoratesRouter } from './modules/governorates/governorates.routes.js';
 import { landmarksRouter, villageLandmarksRouter } from './modules/landmarks/landmarks.routes.js';
 import { villagesRouter } from './modules/villages/villages.routes.js';
+import { usersRouter } from './modules/users/users.routes.js';
 import { redis } from './shared/cache.js';
 import { prisma } from './shared/db.js';
 
@@ -42,6 +43,7 @@ router.get('/health', async (_req, res) => {
 });
 
 router.use('/auth', authRouter);
+router.use('/users', usersRouter);
 router.use('/governorates', governoratesRouter);
 router.use('/events', eventsRouter);
 router.use('/villages/:villageId/events', villageEventsRouter);
