@@ -1,7 +1,7 @@
 import { NotFoundError } from '../../shared/errors.js';
 import { buildPaginationMeta, parsePagination, type PaginationMeta } from '../../shared/pagination.js';
-import { sourceRepository, type SourceDetails, type SourceRepository } from './sources.repository.js';
-import type { ListSourcesQuery } from './sources.schemas.js';
+import { sourceRepository, type SourceDetails, type SourceRepository, type SourceCreateContext } from './sources.repository.js';
+import type { CreateSourceInput, ListSourcesQuery } from './sources.schemas.js';
 
 export interface SourceListResult {
   items: SourceDetails[];
@@ -10,6 +10,10 @@ export interface SourceListResult {
 
 export class SourceService {
   constructor(private readonly repository: SourceRepository = sourceRepository) {}
+
+  create(input: CreateSourceInput, context: SourceCreateContext): Promise<SourceDetails> {
+    return this.repository.create(input, context);
+  }
 
   async list(query: ListSourcesQuery): Promise<SourceListResult> {
     const pagination = parsePagination(query);

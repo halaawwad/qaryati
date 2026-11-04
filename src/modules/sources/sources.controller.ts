@@ -2,6 +2,15 @@ import type { RequestHandler } from 'express';
 import type { ListSourcesQuery, SourceParams } from './sources.schemas.js';
 import { sourceService } from './sources.service.js';
 
+export const create: RequestHandler = async (req, res, next) => {
+  try {
+    const source = await sourceService.create(req.body, { actorId: req.user.id, requestId: req.requestId });
+    res.status(201).json({ data: source });
+  } catch (err) {
+    next(err);
+  }
+};
+
 export const list: RequestHandler = async (req, res, next) => {
   try {
     const result = await sourceService.list(req.query as ListSourcesQuery);

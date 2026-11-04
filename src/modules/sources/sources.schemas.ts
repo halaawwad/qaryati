@@ -24,3 +24,17 @@ export const listSourcesQuerySchema = z.object({
 
 export type SourceParams = z.infer<typeof sourceParamsSchema>;
 export type ListSourcesQuery = z.infer<typeof listSourcesQuerySchema>;
+
+export const createSourceSchema = z.strictObject({
+  title: z.string().trim().min(1),
+  sourceType: z.enum(SourceType),
+  author: z.string().optional(),
+  publisher: z.string().optional(),
+  // API policy for publication years (CE), including forthcoming publications.
+  // This is input validation, not a database constraint.
+  year: z.number().int().min(1).max(new Date().getUTCFullYear() + 1).optional(),
+  url: z.url({ protocol: /^https?$/ }).optional(),
+  citationText: z.string().optional(),
+});
+
+export type CreateSourceInput = z.infer<typeof createSourceSchema>;
