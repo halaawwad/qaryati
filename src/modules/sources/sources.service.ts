@@ -1,7 +1,7 @@
 import { NotFoundError } from '../../shared/errors.js';
 import { buildPaginationMeta, parsePagination, type PaginationMeta } from '../../shared/pagination.js';
-import { sourceRepository, type SourceDetails, type SourceRepository, type SourceCreateContext, type SourceUpdateContext } from './sources.repository.js';
-import type { CreateSourceInput, ListSourcesQuery, UpdateSourceInput } from './sources.schemas.js';
+import { sourceRepository, type SourceDetails, type SourceRepository, type SourceCreateContext, type SourceUpdateContext, type SourceDeletion } from './sources.repository.js';
+import type { CreateSourceInput, DeleteSourceInput, ListSourcesQuery, UpdateSourceInput } from './sources.schemas.js';
 
 export interface SourceListResult {
   items: SourceDetails[];
@@ -10,6 +10,10 @@ export interface SourceListResult {
 
 export class SourceService {
   constructor(private readonly repository: SourceRepository = sourceRepository) {}
+
+  softDelete(id: string, input: DeleteSourceInput, context: SourceUpdateContext): Promise<SourceDeletion> {
+    return this.repository.softDelete(id, input, context);
+  }
 
   update(id: string, input: UpdateSourceInput, context: SourceUpdateContext): Promise<SourceDetails> {
     return this.repository.update(id, input, context);

@@ -2,7 +2,7 @@ import type { Prisma, Role, Source, SourceType, VerificationStatus } from '@pris
 import { prisma } from '../../shared/db.js';
 import { AuditAction } from '@prisma/client';
 import { recordAudit } from '../audit/audit.service.js';
-import type { CreateSourceInput, UpdateSourceInput } from './sources.schemas.js';
+import type { CreateSourceInput, DeleteSourceInput, UpdateSourceInput } from './sources.schemas.js';
 import { ConflictError, ForbiddenError, NotFoundError } from '../../shared/errors.js';
 
 export interface SourceCreateContext {
@@ -12,6 +12,12 @@ export interface SourceCreateContext {
 
 export interface SourceUpdateContext extends SourceCreateContext {
   role: Role;
+}
+
+export interface SourceDeletion {
+  id: string;
+  version: number;
+  deletedAt: Date;
 }
 
 export type SourceDetails = Pick<Source,
@@ -26,6 +32,7 @@ export interface SourceListParams {
 }
 
 export interface SourceRepository {
+  softDelete(id: string, input: DeleteSourceInput, context: SourceUpdateContext): Promise<SourceDeletion>;
   update(id: string, input: UpdateSourceInput, context: SourceUpdateContext): Promise<SourceDetails>;
   create(input: CreateSourceInput, context: SourceCreateContext): Promise<SourceDetails>;
   findMany(params: SourceListParams): Promise<{ items: SourceDetails[]; total: number }>;
@@ -65,6 +72,37 @@ function updateSnapshot(source: SourceDetails): Prisma.InputJsonObject {
 }
 
 export const sourceRepository: SourceRepository = {
+  async softDelete(id, input, context) {
+    if (context.role !== 'ADMIN') throw new ForbiddenError();
+    return prisma.$transaction(async (tx) => {
+      const select = { ...sourceSelect, deletedAt: true } satisfies Prisma.SourceSelect;
+      const current = await tx.source.findFirst({ where: { id, deletedAt: null }, select });
+      if (!current) throw new NotFoundError('Source not found');
+      if (current.version !== input.expectedVersion) throw new ConflictError('Source version conflict');
+
+      const deletedAt = new Date();
+      let deleted: SourceDetails & { deletedAt: Date | null };
+      try {
+        deleted = await tx.source.update({
+          where: { id, deletedAt: null, version: input.expectedVersion },
+          data: { deletedAt, version: { increment: 1 }, updatedById: context.actorId },
+          select,
+        });
+      } catch (err) {
+        if (typeof err === 'object' && err !== null && 'code' in err && err.code === 'P2025') {
+          throw new ConflictError('Source changed during deletion');
+        }
+        throw err;
+      }
+      await recordAudit({
+        entityType: 'Source', entityId: id, action: AuditAction.DELETE,
+        actorId: context.actorId, requestId: context.requestId,
+        before: { ...updateSnapshot(current), deletedAt: current.deletedAt?.toISOString() ?? null },
+        after: { ...updateSnapshot(deleted), deletedAt: deleted.deletedAt?.toISOString() ?? null },
+      }, tx);
+      return { id: deleted.id, version: deleted.version, deletedAt };
+    });
+  },
   async update(id, input, context) {
     return prisma.$transaction(async (tx) => {
       const current = await tx.source.findFirst({

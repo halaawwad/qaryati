@@ -2,6 +2,18 @@ import type { RequestHandler } from 'express';
 import type { ListSourcesQuery, SourceParams } from './sources.schemas.js';
 import { sourceService } from './sources.service.js';
 
+export const softDelete: RequestHandler = async (req, res, next) => {
+  try {
+    const { id } = req.params as SourceParams;
+    const result = await sourceService.softDelete(id, req.body, {
+      actorId: req.user.id, role: req.user.role, requestId: req.requestId,
+    });
+    res.status(200).json({ data: result });
+  } catch (err) {
+    next(err);
+  }
+};
+
 export const update: RequestHandler = async (req, res, next) => {
   try {
     const { id } = req.params as SourceParams;

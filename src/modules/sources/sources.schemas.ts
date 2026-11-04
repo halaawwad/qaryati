@@ -61,3 +61,10 @@ export const updateSourceSchema = z.strictObject({
 );
 
 export type UpdateSourceInput = z.infer<typeof updateSourceSchema>;
+
+// DELETE uses the same JSON expected-version precondition as PATCH.
+export const deleteSourceSchema = z.strictObject({
+  expectedVersion: updateSourceSchema.shape.expectedVersion,
+});
+
+export type DeleteSourceInput = z.infer<typeof deleteSourceSchema>;
