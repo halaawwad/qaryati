@@ -86,6 +86,27 @@ describe('POST Sources', () => {
     expect(mocks.transaction).not.toHaveBeenCalled();
   });
 
+  it.each(['http', 'https'].flatMap(protocol => [
+    `${protocol}://synthetic-user@example.invalid/reference`,
+    `${protocol}://:synthetic-password@example.invalid/reference`,
+    `${protocol}://synthetic-user:synthetic-password@example.invalid/reference`,
+    `${protocol}://%73ynthetic-user:%70assword@example.invalid/reference`,
+  ]))('rejects credentials before persistence or Audit recording: %s', async (url) => {
+    const response = await post({ ...input, url });
+    expect(response.status).toBe(400);
+    expect(response.body.error).toMatchObject({
+      code: 'VALIDATION_ERROR',
+      details: expect.arrayContaining([expect.objectContaining({ field: 'body.url' })]),
+    });
+    expect(response.body).not.toHaveProperty('data');
+    expect(JSON.stringify(response.body)).not.toContain(url);
+    expect(mocks.transaction).not.toHaveBeenCalled();
+    expect(mocks.sourceCreate).not.toHaveBeenCalled();
+    expect(mocks.auditCreate).not.toHaveBeenCalled();
+    expect(mocks.rootSourceCreate).not.toHaveBeenCalled();
+    expect(mocks.rootAuditCreate).not.toHaveBeenCalled();
+  });
+
   it.each([
     {}, { sourceType: 'BOOK' }, { title: 'Reference' }, { ...input, title: '   ' },
     { ...input, title: 123 }, { ...input, sourceType: 'INVALID' },
@@ -104,12 +125,30 @@ describe('POST Sources', () => {
   it.each([1, new Date().getUTCFullYear() + 1])('accepts year boundary %s and optional fields', async (year) => {
     const body = { ...input, year, author: 'Author', publisher: 'Publisher',
       url: 'https://example.com/reference', citationText: 'Citation' };
-    expect((await post(body)).status).toBe(201);
+    // Model the selected database row using the actual persistence arguments.
+    mocks.sourceCreate.mockImplementation(async ({ data }) => ({
+      ...result, title: data.title, sourceType: data.sourceType,
+      author: data.author, publisher: data.publisher, year: data.year,
+      url: data.url, citationText: data.citationText,
+    }));
+    const response = await post(body);
+    expect(response.status).toBe(201);
     expect(mocks.sourceCreate.mock.calls[0]?.[0].data).toEqual({ ...body, createdById: actorId, updatedById: actorId });
+    expect(response.body).toEqual({ data: {
+      ...JSON.parse(JSON.stringify(result)), ...body,
+    } });
+    expect(mocks.auditCreate).toHaveBeenCalledExactlyOnceWith({ data: {
+      entityType: 'Source', entityId: id, action: AuditAction.CREATE,
+      actorId, requestId: response.headers['x-request-id'], before: Prisma.DbNull,
+      after: { id, ...body, verificationStatus: 'PENDING', version: 1 },
+    } });
   });
 
   it.each(Object.values(SourceType))('accepts actual SourceType %s', async (sourceType) => {
     expect((await post({ ...input, sourceType, url: 'http://example.com' })).status).toBe(201);
+    expect(mocks.sourceCreate).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      data: expect.objectContaining({ ...input, sourceType, url: 'http://example.com' }),
+    }));
   });
 
   it('generates a request ID when absent and uses it for the audit', async () => {

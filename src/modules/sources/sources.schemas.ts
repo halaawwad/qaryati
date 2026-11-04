@@ -33,7 +33,14 @@ export const createSourceSchema = z.strictObject({
   // API policy for publication years (CE), including forthcoming publications.
   // This is input validation, not a database constraint.
   year: z.number().int().min(1).max(new Date().getUTCFullYear() + 1).optional(),
-  url: z.url({ protocol: /^https?$/ }).optional(),
+  url: z.url({ protocol: /^https?$/ }).refine((value) => {
+    try {
+      const url = new URL(value);
+      return url.username === '' && url.password === '';
+    } catch {
+      return false;
+    }
+  }, { message: 'URL must not contain username or password credentials' }).optional(),
   citationText: z.string().optional(),
 });
 
