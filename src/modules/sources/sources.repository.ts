@@ -1,12 +1,17 @@
-import type { Prisma, Source, SourceType, VerificationStatus } from '@prisma/client';
+import type { Prisma, Role, Source, SourceType, VerificationStatus } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
 import { AuditAction } from '@prisma/client';
 import { recordAudit } from '../audit/audit.service.js';
-import type { CreateSourceInput } from './sources.schemas.js';
+import type { CreateSourceInput, UpdateSourceInput } from './sources.schemas.js';
+import { ConflictError, ForbiddenError, NotFoundError } from '../../shared/errors.js';
 
 export interface SourceCreateContext {
   actorId: string;
   requestId: string;
+}
+
+export interface SourceUpdateContext extends SourceCreateContext {
+  role: Role;
 }
 
 export type SourceDetails = Pick<Source,
@@ -21,6 +26,7 @@ export interface SourceListParams {
 }
 
 export interface SourceRepository {
+  update(id: string, input: UpdateSourceInput, context: SourceUpdateContext): Promise<SourceDetails>;
   create(input: CreateSourceInput, context: SourceCreateContext): Promise<SourceDetails>;
   findMany(params: SourceListParams): Promise<{ items: SourceDetails[]; total: number }>;
   findById(id: string): Promise<SourceDetails | null>;
@@ -32,7 +38,85 @@ const sourceSelect = {
   createdAt: true, updatedAt: true,
 } satisfies Prisma.SourceSelect;
 
+function auditUrl(value: string | null): string | null {
+  if (value === null) return null;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+    url.username = '';
+    url.password = '';
+    // Omit all query parameters and fragments, including unrecognized secret names.
+    url.search = '';
+    url.hash = '';
+    return url.toString();
+  } catch {
+    // Legacy malformed URLs must never be copied verbatim into Audit.
+    return null;
+  }
+}
+
+function updateSnapshot(source: SourceDetails): Prisma.InputJsonObject {
+  return {
+    id: source.id, title: source.title, sourceType: source.sourceType,
+    author: source.author, publisher: source.publisher, year: source.year,
+    url: auditUrl(source.url), citationText: source.citationText,
+    verificationStatus: source.verificationStatus, version: source.version,
+  };
+}
+
 export const sourceRepository: SourceRepository = {
+  async update(id, input, context) {
+    return prisma.$transaction(async (tx) => {
+      const current = await tx.source.findFirst({
+        where: { id, deletedAt: null }, select: { ...sourceSelect, createdById: true },
+      });
+      if (!current) throw new NotFoundError('Source not found');
+
+      const editor = context.role === 'EDITOR';
+      // REJECTED is temporarily fail-closed until the team defines its editing policy.
+      const allowed = editor
+        ? current.verificationStatus === 'PENDING' && current.createdById === context.actorId
+        : (context.role === 'REVIEWER' || context.role === 'ADMIN')
+          && (current.verificationStatus === 'PENDING' || current.verificationStatus === 'VERIFIED');
+      if (!allowed) throw new ForbiddenError('Direct editing is not permitted for this source');
+      if (current.version !== input.expectedVersion) throw new ConflictError('Source version conflict');
+
+      const changes = {
+        title: input.title, sourceType: input.sourceType, author: input.author,
+        publisher: input.publisher, year: input.year, url: input.url, citationText: input.citationText,
+      };
+      const changed = Object.entries(changes).some(([key, value]) =>
+        value !== undefined && value !== current[key as keyof typeof changes]);
+      // Do not expose the creator ID selected solely for authorization.
+      const { createdById: _createdById, ...before } = current;
+      if (!changed) return before;
+
+      let updated: SourceDetails;
+      try {
+        updated = await tx.source.update({
+          where: {
+            id, deletedAt: null, version: input.expectedVersion,
+            verificationStatus: current.verificationStatus,
+            ...(editor ? { createdById: context.actorId } : {}),
+          },
+          data: { ...changes, updatedById: context.actorId, version: { increment: 1 } },
+          select: sourceSelect,
+        });
+      } catch (err) {
+        // A failed conditional update means the record changed after our read.
+        if (typeof err === 'object' && err !== null && 'code' in err && err.code === 'P2025') {
+          throw new ConflictError('Source changed during update');
+        }
+        throw err;
+      }
+      await recordAudit({
+        entityType: 'Source', entityId: id, action: AuditAction.UPDATE,
+        actorId: context.actorId, requestId: context.requestId,
+        before: updateSnapshot(before), after: updateSnapshot(updated),
+      }, tx);
+      return updated;
+    });
+  },
   async create(input, context) {
     return prisma.$transaction(async (tx) => {
       const source = await tx.source.create({

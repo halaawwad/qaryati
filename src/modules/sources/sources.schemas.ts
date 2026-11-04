@@ -45,3 +45,19 @@ export const createSourceSchema = z.strictObject({
 });
 
 export type CreateSourceInput = z.infer<typeof createSourceSchema>;
+
+export const updateSourceSchema = z.strictObject({
+  expectedVersion: z.number().int().positive(),
+  title: createSourceSchema.shape.title.optional(),
+  sourceType: createSourceSchema.shape.sourceType.optional(),
+  author: createSourceSchema.shape.author.nullable(),
+  publisher: createSourceSchema.shape.publisher.nullable(),
+  year: createSourceSchema.shape.year.nullable(),
+  url: createSourceSchema.shape.url.nullable(),
+  citationText: createSourceSchema.shape.citationText.nullable(),
+}).refine(
+  ({ expectedVersion: _expectedVersion, ...changes }) => Object.values(changes).some(value => value !== undefined),
+  { message: 'At least one editable field is required' },
+);
+
+export type UpdateSourceInput = z.infer<typeof updateSourceSchema>;
