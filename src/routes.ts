@@ -1,8 +1,12 @@
 import { Router } from 'express';
 import { authRouter } from './modules/auth/auth.routes.js';
+import { eventsRouter, villageEventsRouter } from './modules/events/events.routes.js';
 import { governoratesRouter } from './modules/governorates/governorates.routes.js';
+import { heritageRouter, villageHeritageRouter } from './modules/heritage/heritage.routes.js';
 import { landmarksRouter, villageLandmarksRouter } from './modules/landmarks/landmarks.routes.js';
 import { villagesRouter } from './modules/villages/villages.routes.js';
+import { sourcesRouter } from './modules/sources/sources.routes.js';
+import { usersRouter } from './modules/users/users.routes.js';
 import { redis } from './shared/cache.js';
 import { prisma } from './shared/db.js';
 
@@ -41,7 +45,13 @@ router.get('/health', async (_req, res) => {
 });
 
 router.use('/auth', authRouter);
+router.use('/sources', sourcesRouter);
+router.use('/users', usersRouter);
 router.use('/governorates', governoratesRouter);
+router.use('/heritage', heritageRouter);
+router.use('/villages/:villageId/heritage', villageHeritageRouter);
+router.use('/events', eventsRouter);
+router.use('/villages/:villageId/events', villageEventsRouter);
 router.use('/landmarks', landmarksRouter);
 router.use('/villages/:villageId/landmarks', villageLandmarksRouter);
 router.use('/villages', villagesRouter);
