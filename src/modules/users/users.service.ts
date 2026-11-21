@@ -1,6 +1,7 @@
+import { AuditAction } from '@prisma/client';
 import { AppError } from '../../shared/errors.js';
 import { buildPaginationMeta, parsePagination } from '../../shared/pagination.js';
-import { userRepository, type UserChange, type UserRepository } from './users.repository.js';
+import { userRepository, type UserChange, type UserChangeContext, type UserRepository } from './users.repository.js';
 import type { ListUsersQuery, UserRole } from './users.schemas.js';
 
 function userNotFound(): AppError {
@@ -26,15 +27,15 @@ export class UserService {
     return user;
   }
 
-  updateRole(actorId: string, id: string, role: UserRole) {
-    return this.change(actorId, id, { role });
+  updateRole(context: UserChangeContext, id: string, role: UserRole) {
+    return this.change(context, id, { role });
   }
 
-  updateStatus(actorId: string, id: string, isActive: boolean) {
-    return this.change(actorId, id, { isActive });
+  updateStatus(context: UserChangeContext, id: string, isActive: boolean) {
+    return this.change(context, id, { isActive });
   }
 
-  private async change(actorId: string, id: string, change: UserChange) {
+  private async change({ actorId, requestId }: UserChangeContext, id: string, change: UserChange) {
     for (let attempt = 1; ; attempt++) {
       try {
         return await this.repository.transaction(async (repository) => {
@@ -52,7 +53,12 @@ export class UserService {
           }
           const updated = await repository.update(id, change);
           if ('isActive' in change && !change.isActive) await repository.revokeRefreshTokens(id);
-          // TODO(audit): Call recordAudit for role/status changes in this transaction when src/modules/audit exports it.
+          // Snapshot only the changed field; the transaction rolls back the audit row on retry or failure.
+          await repository.recordAudit({
+            entityType: 'User', entityId: id, action: AuditAction.UPDATE, actorId, requestId,
+            before: 'role' in change ? { role: user.role } : { isActive: user.isActive },
+            after: 'role' in change ? { role: updated.role } : { isActive: updated.isActive },
+          });
           return updated;
         });
       } catch (err) {
