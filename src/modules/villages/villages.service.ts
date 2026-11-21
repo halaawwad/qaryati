@@ -1,3 +1,4 @@
+import type { Prisma } from '@prisma/client';
 import { NotFoundError } from '../../shared/errors.js';
 import { buildPaginationMeta, parsePagination, type PaginationMeta } from '../../shared/pagination.js';
 import {
@@ -58,10 +59,11 @@ export class VillageService {
    * a foreign-key error or a row attached to a hidden village. Ids that are not UUIDs are
    * rejected without querying the database.
    *
-   * This is a check, not a lock: it does not stop the village from being soft-deleted afterwards.
+   * With a transaction client, holds a shared row lock until that transaction ends so that
+   * deletion or modification cannot race a dependent write. Without one this is only a check.
    */
-  async ensureExists(villageId: string): Promise<void> {
-    if (!UUID_PATTERN.test(villageId) || !(await this.repository.exists(villageId))) {
+  async ensureExists(villageId: string, client?: Prisma.TransactionClient): Promise<void> {
+    if (!UUID_PATTERN.test(villageId) || !(await this.repository.exists(villageId, client))) {
       throw new NotFoundError('Village not found');
     }
   }

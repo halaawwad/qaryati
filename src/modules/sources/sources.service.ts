@@ -1,3 +1,4 @@
+import type { Prisma } from '@prisma/client';
 import { NotFoundError } from '../../shared/errors.js';
 import { buildPaginationMeta, parsePagination, type PaginationMeta } from '../../shared/pagination.js';
 import { sourceRepository, type SourceDetails, type SourceRepository, type SourceCreateContext, type SourceUpdateContext, type SourceDeletion } from './sources.repository.js';
@@ -33,8 +34,9 @@ export class SourceService {
     return { items: result.items, meta: buildPaginationMeta(result.total, pagination) };
   }
 
-  async getById(id: string): Promise<SourceDetails> {
-    const source = await this.repository.findById(id);
+  /** A supplied transaction holds a shared row lock to protect a dependent write. */
+  async getById(id: string, client?: Prisma.TransactionClient): Promise<SourceDetails> {
+    const source = await this.repository.findById(id, client);
     if (!source) throw new NotFoundError('Source not found');
     return source;
   }

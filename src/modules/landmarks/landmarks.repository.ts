@@ -1,6 +1,11 @@
 import type { Landmark, LandmarkType, Prisma, VerificationStatus } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
-import type { LandmarkSortField, SortOrder } from './landmarks.schemas.js';
+import type { CreateLandmarkInput, LandmarkSortField, SortOrder } from './landmarks.schemas.js';
+
+export interface LandmarkCreateContext {
+  actorId: string;
+  requestId: string;
+}
 
 export type LandmarkDetails = Pick<
   Landmark,
@@ -24,6 +29,8 @@ export interface LandmarkListParams {
 }
 
 export interface LandmarkRepository {
+  transaction<T>(fn: (client: Prisma.TransactionClient) => Promise<T>): Promise<T>;
+  create(villageId: string, input: CreateLandmarkInput, context: LandmarkCreateContext, client: Prisma.TransactionClient): Promise<LandmarkDetails>;
   /** Null means the village is missing or deleted; an empty list means no matching landmarks. */
   findMany(params: LandmarkListParams): Promise<{ items: LandmarkDetails[]; total: number } | null>;
   /** Only returns active landmarks belonging to active villages. */
@@ -88,6 +95,24 @@ function buildOrderBy({ field, order }: LandmarkListParams['sort']): Prisma.Land
 }
 
 export const landmarkRepository: LandmarkRepository = {
+  transaction(fn) {
+    return prisma.$transaction(fn);
+  },
+
+  async create(villageId, input, context, client) {
+    const row = await client.landmark.create({
+      data: {
+        villageId, nameAr: input.nameAr, nameEn: input.nameEn,
+        landmarkType: input.landmarkType, description: input.description,
+        latitude: input.latitude, longitude: input.longitude, sourceId: input.sourceId,
+        createdById: context.actorId, updatedById: context.actorId,
+        // Prisma supplies PENDING and version 1, along with ID and timestamps.
+      },
+      select: landmarkSelect,
+    });
+    return toLandmark(row);
+  },
+
   async findMany(params) {
     return prisma.$transaction(async (tx) => {
       const village = await tx.village.findFirst({
