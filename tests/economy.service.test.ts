@@ -16,6 +16,8 @@ const item: EconomyDetails = {
 
 describe('EconomyService', () => {
   const repo = {
+    transaction: vi.fn<EconomyRepository['transaction']>(),
+    create: vi.fn<EconomyRepository['create']>(),
     findMany: vi.fn<EconomyRepository['findMany']>(),
     findById: vi.fn<EconomyRepository['findById']>(),
   };

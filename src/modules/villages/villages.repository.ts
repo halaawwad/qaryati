@@ -71,8 +71,8 @@ export interface VillageRepository {
   findMany(params: VillageListParams): Promise<{ items: VillageListItem[]; total: number }>;
   /** Returns null when the village does not exist or is soft-deleted. */
   findDetails(lookup: VillageLookup): Promise<VillageDetails | null>;
-  /** True only for a village that exists and is not soft-deleted. */
-  exists(id: string): Promise<boolean>;
+  /** True only for an active village; a supplied transaction holds a shared row lock. */
+  exists(id: string, client?: Prisma.TransactionClient): Promise<boolean>;
 }
 
 // Only nullable columns accept a `nulls` position in Prisma's orderBy.
@@ -216,7 +216,14 @@ export const villageRepository: VillageRepository = {
     };
   },
 
-  async exists(id) {
+  async exists(id, client) {
+    if (client) {
+      // FOR SHARE also blocks non-key updates such as soft deletion; FK locks do not.
+      const rows = await client.$queryRaw<{ id: string }[]>`
+        SELECT id FROM villages WHERE id = ${id}::uuid AND deleted_at IS NULL FOR SHARE
+      `;
+      return rows.length > 0;
+    }
     const row = await prisma.village.findFirst({
       where: { id, deletedAt: null },
       select: { id: true },
