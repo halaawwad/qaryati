@@ -40,6 +40,16 @@ npm run perf:clean
 
 To compare several variants fairly, take all the measurements **in one session**, one after the other, and keep the machine otherwise idle.
 
+## The write scenario
+
+`SCENARIO=writes` makes `measure.sh` run [`k6/village-writes.js`](../village-writes.js) instead of the search scenario, with the same procedure and the same gate (no totals check):
+
+```bash
+SCENARIO=writes k6/tools/measure.sh writes 2026-11-23 "main@abc1234, UNION search and the trigram indexes"
+```
+
+It needs the village write endpoints, and logs in as the seeded admin from `SEED_ADMIN_EMAIL` and `SEED_ADMIN_PASSWORD` in `.env` (or `ADMIN_EMAIL` and `ADMIN_PASSWORD`); the values are passed to the k6 container by name, so they never appear on a command line. The result file adds a reconciliation line: the growth of `audit_logs` during the measured run against the number of successful writes counted by k6 (they must match, because every successful write adds one audit row and the deliberate stale update, a 409, adds none). The villages it creates have slugs starting with `perf-w-`, and `npm run perf:clean` removes them and their audit rows.
+
 ## The quiet-machine gate
 
 Before the warm-up, `measure.sh` samples the machine for 30 s. If the average CPU is above `MAX_CPU` (default 20 %) or the lowest free RAM is below `MIN_RAM_MB` (default 650 MB) it waits a minute and checks again, up to `MAX_WAIT_MIN` (default 10) minutes. If the machine is still busy it exits with code 3 and measures nothing. The CPU and RAM values and the number of processes named in `WATCH_PROCESSES` (default `chrome msedge`) are appended to the result file, so a result always says under which conditions it was taken. All three settings can be overridden through the environment, for example `MIN_RAM_MB=800 k6/tools/measure.sh ...`.

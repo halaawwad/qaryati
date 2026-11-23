@@ -36,6 +36,9 @@ const GOVERNORATE_IDS = Array.from({ length: 16 }, (_, i) => `01000000-0000-4000
 
 const expectedConflicts = new Counter('expected_version_conflicts');
 const unexpectedConflicts = new Counter('unexpected_version_conflicts');
+// Every successful write (not the deliberate stale update) adds one audit row, so this should match the
+// growth of audit_logs during the run.
+const successfulWrites = new Counter('successful_writes');
 
 // Status codes that are the right answer for each kind of request.
 const KINDS = {
@@ -60,6 +63,7 @@ export const options = {
     ...perKind('http_reqs', 'count>=0'),
     expected_version_conflicts: ['count>=0'],
     unexpected_version_conflicts: ['count>=0'],
+    successful_writes: ['count>=0'],
   },
   summaryTrendStats: ['avg', 'min', 'med', 'p(90)', 'p(95)', 'p(99)', 'max'],
 };
@@ -86,6 +90,7 @@ function send(method, path, token, body, kind) {
 
   const ok = check(res, { [`${kind}: status is ${expected.join(' or ')}`]: (r) => expected.includes(r.status) });
   if (res.status === 409) (kind === 'stale_update' ? expectedConflicts : unexpectedConflicts).add(1);
+  if (ok && kind !== 'stale_update') successfulWrites.add(1);
 
   return ok ? res : null;
 }
@@ -169,6 +174,9 @@ export function handleSummary(data) {
     'version conflicts (409)',
     `  expected (stale_update, on purpose):  ${values('expected_version_conflicts').count ?? 0}`,
     `  unexpected (anywhere else):           ${values('unexpected_version_conflicts').count ?? 0}`,
+    '',
+    'successful writes (each adds one audit row)',
+    `  ${values('successful_writes').count ?? 0}`,
     '',
     'per request kind',
     `  ${'kind'.padEnd(14)} ${'requests'.padStart(7)} ${'avg'.padStart(11)} ${'p95'.padStart(11)} ${'max'.padStart(11)} ${'errors'.padStart(9)}`,

@@ -10,6 +10,12 @@
 # (discarded), 60 s measured with 20 virtual users. Results go to k6/results/<date>-<label>-20k.{json,txt}
 # and k6/results/<date>-totals-<label>.txt.
 #
+# SCENARIO=search (default) runs k6/village-search.js, with the totals check. SCENARIO=writes runs
+# k6/village-writes.js instead: no totals check, the admin from SEED_ADMIN_EMAIL / SEED_ADMIN_PASSWORD in .env
+# (or ADMIN_EMAIL / ADMIN_PASSWORD) is used to log in, and the growth of audit_logs during the measured run
+# is compared with the number of successful writes. It needs the village write endpoints and cleans up
+# with `npm run perf:clean`.
+#
 # Quiet-machine gate: the machine is sampled for 30 s (average CPU, lowest free RAM). If CPU is above
 # MAX_CPU or free RAM is below MIN_RAM_MB it waits a minute and checks again, up to MAX_WAIT_MIN minutes,
 # then gives up (exit 3) without measuring.
@@ -35,6 +41,12 @@ MAX_CPU="${MAX_CPU:-20}"
 MIN_RAM_MB="${MIN_RAM_MB:-650}"
 MAX_WAIT_MIN="${MAX_WAIT_MIN:-10}"
 WATCH_PROCESSES="${WATCH_PROCESSES:-chrome msedge}"
+SCENARIO="${SCENARIO:-search}"
+case "$SCENARIO" in
+  search) K6_SCRIPT=village-search.js ;;
+  writes) K6_SCRIPT=village-writes.js ;;
+  *) echo "SCENARIO must be search or writes"; exit 2 ;;
+esac
 K6_NETWORK="${K6_NETWORK:-$(basename "$ROOT" | tr 'A-Z' 'a-z' | tr -cd 'a-z0-9_-')_default}"
 
 env_value() { [ -f .env ] && grep -E "^$1=" .env | head -1 | cut -d= -f2- || true; }
@@ -87,8 +99,10 @@ psql_q "ANALYZE villages; ANALYZE village_names;" >/dev/null
 COUNTS="$(psql_q "select (select count(*) from villages)||' villages, '||(select count(*) from village_names)||' village_names, trgm indexes: '||(select count(*) from pg_indexes where indexname like '%trgm%')")"
 echo "$COUNTS"
 
-echo "== totals check"
-node k6/tools/search-totals.mjs "$TOTALS"
+if [ "$SCENARIO" = search ]; then
+  echo "== totals check"
+  node k6/tools/search-totals.mjs "$TOTALS"
+fi
 
 echo "== quiet-machine gate (CPU <= ${MAX_CPU} %, free RAM >= ${MIN_RAM_MB} MB, over 30 s; up to ${MAX_WAIT_MIN} min)"
 GATE_OK=0
@@ -105,24 +119,40 @@ fi
 COND="$(printf 'in the 30 s before the warm-up: average CPU %s %%, lowest free RAM %s MB\n' "$CPU_AVG" "$RAM_MIN"; process_counts)"
 echo "$COND"
 
+# The admin credentials are passed by name, so their values never appear on a command line or in a log.
+K6_AUTH=()
+if [ "$SCENARIO" = writes ]; then
+  export ADMIN_EMAIL="${ADMIN_EMAIL:-$(env_value SEED_ADMIN_EMAIL)}"
+  export ADMIN_PASSWORD="${ADMIN_PASSWORD:-$(env_value SEED_ADMIN_PASSWORD)}"
+  [ -n "$ADMIN_EMAIL" ] && [ -n "$ADMIN_PASSWORD" ] || { echo "admin credentials are not set"; exit 1; }
+  K6_AUTH=(-e ADMIN_EMAIL -e ADMIN_PASSWORD)
+fi
+
 run_k6() { # extra docker arguments follow
   MSYS_NO_PATHCONV=1 docker run --rm --network "$K6_NETWORK" \
     -v "${K6_DIR}:/scripts" \
-    -e BASE_URL=http://app:3000 -e VUS=20 "$@" \
-    grafana/k6:1.0.0 run /scripts/village-search.js
+    -e BASE_URL=http://app:3000 -e VUS=20 ${K6_AUTH[@]+"${K6_AUTH[@]}"} "$@" \
+    grafana/k6:1.0.0 run "/scripts/${K6_SCRIPT}"
 }
 
 echo "== warm-up (15 s, discarded)"
 run_k6 -e DURATION=15s -e LABEL=warmup >/dev/null 2>&1 || true
 
+AUDIT_BEFORE="$(psql_q 'select count(*) from audit_logs')"
 echo "== measured run (20 VUs, 60 s)"
 run_k6 -e DURATION=60s -e "LABEL=${LABEL}" \
   -e "DATASET=${COUNTS}; 20000 perf- seed=1 + 14 real; code=${CODE}" \
   -e "RESULT_FILE=/scripts/results/${DATE}-${LABEL}-20k.json" | tail -40
 
+AUDIT_AFTER="$(psql_q 'select count(*) from audit_logs')"
+
 {
   echo "conditions (same procedure and the same quiet-machine gate for every measurement):"
   echo "$COND" | sed 's/^/  /'
-  echo "  procedure: app recreated, ANALYZE, totals check, quiet-machine gate, 15s warm-up (discarded), then 60s measured"
+  if [ "$SCENARIO" = writes ]; then
+    WRITES="$(python3 -c "import json,sys; print(int(json.load(open(sys.argv[1]))['metrics']['successful_writes']['values']['count']))" "${OUT}.json" 2>/dev/null || python -c "import json,sys; print(int(json.load(open(sys.argv[1]))['metrics']['successful_writes']['values']['count']))" "${OUT}.json")"
+    echo "  audit_logs during the measured run: ${AUDIT_BEFORE} -> ${AUDIT_AFTER} (+$(( AUDIT_AFTER - AUDIT_BEFORE ))); successful writes counted by k6: ${WRITES}; match: $( [ $(( AUDIT_AFTER - AUDIT_BEFORE )) -eq "$WRITES" ] && echo yes || echo NO )"
+  fi
+  echo "  procedure: app recreated, ANALYZE, $( [ "$SCENARIO" = search ] && echo 'totals check, ' )quiet-machine gate, 15s warm-up (discarded), then 60s measured"
 } >> "${OUT}.txt"
 echo "== done: ${OUT}.txt"

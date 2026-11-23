@@ -1,0 +1,36 @@
+k6 village writes: writes
+  target:   http://app:3000/api/v1/villages (create, update, verify, reject, delete)
+  load:     20 VUs, 60s (constant-vus)
+  dataset:  20014 villages, 26068 village_names, trgm indexes: 4; 20000 perf- seed=1 + 14 real; code=main@dec2f22 merged into perf/k6-village-search@dc978f9: UNION search, trigram indexes, village write endpoints (#31, #38, #39)
+
+overall
+  requests:    8185
+  throughput:  133.52 req/s
+  avg:         146.9 ms
+  p95:         215.6 ms
+  p99:         289.5 ms
+  max:         1103.0 ms
+  error rate:  0.00 %   (unexpected statuses only; the stale_update 409s are expected)
+  checks ok:   100.00 %
+
+version conflicts (409)
+  expected (stale_update, on purpose):  1023
+  unexpected (anywhere else):           0
+
+successful writes (each adds one audit row)
+  7161
+
+per request kind
+  kind           requests         avg         p95         max    errors
+  create            1023    156.3 ms    204.0 ms   1103.0 ms    0.00 %
+  update            3069    161.6 ms    229.9 ms    720.2 ms    0.00 %
+  stale_update      1023     94.2 ms    138.6 ms    446.3 ms    0.00 %
+  verify            1023    159.2 ms    231.5 ms    442.5 ms    0.00 %
+  reject            1023    156.9 ms    220.7 ms    314.5 ms    0.00 %
+  delete            1023    123.2 ms    168.2 ms    233.7 ms    0.00 %
+conditions (same procedure and the same quiet-machine gate for every measurement):
+  in the 30 s before the warm-up: average CPU 9 %, lowest free RAM 676 MB
+  chrome processes: 0
+  msedge processes: 0
+  audit_logs during the measured run: 1540 -> 8701 (+7161); successful writes counted by k6: 7161; match: yes
+  procedure: app recreated, ANALYZE, quiet-machine gate, 15s warm-up (discarded), then 60s measured
