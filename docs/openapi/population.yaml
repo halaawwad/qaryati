@@ -15,7 +15,11 @@ paths:
         must be active; any source verification status is accepted. A new record is
         PENDING, version 1 and not preferred. Duplicate village/year/source records,
         including soft-deleted records, produce a conflict. Creation and audit logging
-        are atomic. Reference date need not match the reference year.
+        are atomic. Reference date need not match the reference year. needsReview is
+        calculated by comparing population with the non-deleted VERIFIED record for
+        the village with the highest reference year (ties use ascending record ID).
+        A difference greater than 50% is flagged; no baseline means false. An invalid
+        non-positive baseline is flagged for review.
       security:
         - bearerAuth: []
       parameters:
@@ -202,7 +206,6 @@ components:
         sourceId: { type: string, format: uuid }
         referenceDate: { type: string, format: date-time, nullable: true }
         isEstimate: { type: boolean, default: false }
-        needsReview: { type: boolean, default: false }
         notes: { type: string, maxLength: 5000, nullable: true, description: Trimmed before length validation. }
     VerificationStatus:
       type: string

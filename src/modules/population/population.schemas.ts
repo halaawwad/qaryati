@@ -9,7 +9,6 @@ export const createPopulationSchema = z.strictObject({
  sourceId: z.uuid(),
  referenceDate: z.iso.datetime({ offset: true }).nullable().optional(),
  isEstimate: z.boolean().default(false),
- needsReview: z.boolean().default(false),
  notes: z.string().trim().max(5000).nullable().optional(),
 });
 export type CreatePopulationInput = z.infer<typeof createPopulationSchema>;
