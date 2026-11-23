@@ -29,6 +29,10 @@ type RefreshTransactionResult =
 
 const BCRYPT_COST = 12;
 
+// Hash of a random value nobody knows, with the same cost as real hashes. Login compares against it
+// when the email is unknown, so both cases take the same time and do not reveal registered emails.
+const DUMMY_PASSWORD_HASH = '$2b$12$sUkgmdOnwpSeBMbgQKY1/.Wp79kIyHyW0NHQqr6kjqP9FiFsa.AcC';
+
 function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
@@ -67,9 +71,9 @@ export class AuthService {
   async login(input: LoginInput): Promise<AuthResult> {
     const email = normalizeEmail(input.email);
     const user = await this.repository.findUserByEmail(email);
-    const validPassword = user ? await bcrypt.compare(input.password, user.passwordHash) : false;
+    const passwordMatches = await bcrypt.compare(input.password, user?.passwordHash ?? DUMMY_PASSWORD_HASH);
 
-    if (!user || !validPassword) {
+    if (!user || !passwordMatches) {
       throw new AppError(401, 'INVALID_CREDENTIALS', 'Invalid email or password');
     }
 
@@ -153,7 +157,7 @@ export class AuthService {
 
   verifyAccessToken(token: string): { id: string; role: Role } {
     try {
-      const payload = jwt.verify(token, env.JWT_ACCESS_SECRET) as AccessTokenPayload;
+      const payload = jwt.verify(token, env.JWT_ACCESS_SECRET, { algorithms: ['HS256'] }) as AccessTokenPayload;
       if (!payload.sub || !payload.role || !Object.values(Role).includes(payload.role)) {
         throw new UnauthorizedError();
       }
