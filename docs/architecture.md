@@ -3,7 +3,7 @@
 Qaryati is a **modular monolith**: one Node.js + Express + TypeScript service, split into feature modules that each own their routes, logic and data access ([ADR 0003](adr/0003-modular-monolith.md)).
 It runs with PostgreSQL and Redis through Docker Compose. Database tables are described in [erd.md](erd.md).
 
-Items marked *planned* are agreed in the team guide but not merged into `main` yet. This page describes `main` as of 2026-11-23.
+Items marked *planned* are agreed in the team guide but not merged into `main` yet. This page describes `main` at commit `dec2f22` (2026-11-23); it is refreshed with the final README.
 
 ## 1. System context
 
@@ -65,12 +65,13 @@ flowchart TB
         facilities[facilities]
     end
 
-    geo["integrations/geo<br/>(planned)"]
+    geo["integrations/geo<br/>Nominatim client (planned)"]
 
     app --> hala & yaman & sara & zeina
     zeina -- "ensureExists" --> villages
     zeina -- "getById" --> sources
     zeina -.-> geo
+    geo -. "applyGeoEnrichment()" .-> villages
 ```
 
 All modules also use `src/shared/`: `db` (Prisma), `cache` (Redis), `logger`, `errors`, `pagination`, and the middlewares `requestId`, `validate`, `authenticate`, `requireRole`, `rateLimit` and `errorHandler`.
@@ -149,7 +150,13 @@ Which routes need a token:
 - **Signed in:** `GET /auth/me`, and every create / update on content (`EDITOR`, `REVIEWER`, `ADMIN`).
 - **`ADMIN` only:** `GET /users`, `GET /users/:id`, `PATCH /users/:id/role`, `PATCH /users/:id/status`, and deletes.
 
-Audit: content writes (sources, landmarks, economy, facilities) and user role / status changes write an audit row in the same transaction as the change, so both succeed or fail together. Auth actions (register, login, refresh, logout) do not write audit rows.
+Audit: these writes add an audit row in the same transaction as the change, so both succeed or fail together:
+- villages: create, update, delete, verify, reject, and geo enrichment (`after.source = 'geo-enrichment'`)
+- village relations: alternate names (add, update, delete) and nearby places (add, delete)
+- sources, landmarks, economy and facilities: their writes
+- users: role and status changes
+
+Auth actions (register, login, refresh, logout) do not write audit rows.
 
 ## 5. API conventions
 
@@ -163,14 +170,16 @@ Audit: content writes (sources, landmarks, economy, facilities) and user role / 
 | Request ID | `X-Request-Id` header on every response; also in logs and audit rows |
 | Health | `GET /api/v1/health` returns `200` or `503` with `db` and `redis` status |
 | Roles | Visitor reads; `EDITOR` adds (as `PENDING`); `REVIEWER` verifies or rejects; `ADMIN` also deletes and manages users. The full matrix is in the team guide |
-| Conflicts | Endpoints that implement optimistic locking require the `version` the client read and return `409 CONFLICT` when it is stale. On `main` these are the sources update / delete (`expectedVersion`) and the village update / verify / reject (`version`). The column alone does not prevent overwrites |
+| Conflicts | Endpoints that implement optimistic locking require the `version` the client read and return `409 CONFLICT` when it is stale. On `main`: sources update / delete (`expectedVersion`), village update / verify / reject and alternate-name update (`version`), and geo enrichment when called with `expectedVersion`. These writes increment `version`. Village and alternate-name deletes and nearby-place writes neither check nor increment it. The column alone does not prevent overwrites |
 
 ### Merged vs planned workflows
 
 | Workflow | On `main` | Planned |
 |---|---|---|
-| Content creation (`PENDING`) with audit | sources, landmarks, economy, facilities | villages, population |
-| Verify / reject endpoints | — | villages, population, other content |
+| Content creation (`PENDING`) with audit | villages, alternate names, nearby places, sources, landmarks, economy, facilities | population |
+| Update with role and ownership rules (`EDITOR`: own `PENDING` only) | villages, alternate names | other content |
+| Verify / reject endpoints | villages | population, other content |
+| Geo enrichment | `villageService.applyGeoEnrichment()` (no route) | Nominatim client in `integrations/geo` |
 | Population records (multiple sources per year) | Table and constraints only | Read and create endpoints, automatic `needs_review` |
 | Choosing the preferred population record | Table and constraint only (`is_preferred`) | Reviewer endpoint |
 | Change requests for edits to `VERIFIED` data | Table only | Endpoints and review flow |
@@ -179,5 +188,6 @@ Audit: content writes (sources, landmarks, economy, facilities) and user role / 
 
 - Passwords hashed with bcrypt (`bcryptjs`); access tokens are short-lived JWTs (HS256); refresh tokens are random, stored only as SHA-256 hashes, and rotated on use ([ADR 0004](adr/0004-authentication-tokens.md)).
 - `helmet` security headers, configurable CORS, `x-powered-by` disabled, 1 MB body limit.
-- Rate limits stored in Redis: a global API limit plus stricter limits on login, register and refresh. `/health` is not limited.
+- Rate limits stored in Redis: a global API limit plus stricter limits on login, register and refresh. `/health` is not limited. Limits and windows are set with the `*RATE_LIMIT*` variables; see [security.md](security.md#rate-limiting).
+- The API itself serves plain HTTP on port 3000. In a deployment, HTTPS is expected to be terminated by a reverse proxy in front of it; set `TRUST_PROXY=true` only in that case so rate limits use the real client IP.
 - Server errors return a generic message; details stay in the logs. The `Authorization` header is redacted from logs.

@@ -266,8 +266,8 @@ Shared columns on content tables:
 | Column | Purpose |
 |---|---|
 | `verification_status` | `PENDING`, `VERIFIED` or `REJECTED`; new content starts as `PENDING` |
-| `version` | Starts at 1; the write endpoints that use it increment it on every change. The column alone does not prevent lost updates: optimistic locking works only where the endpoint compares the client's version before writing and returns `409 Conflict` when it is stale (on `main`: sources update / delete, village update / verify / reject) |
-| `deleted_at` | Soft delete; rows are hidden, not removed |
+| `version` | Starts at 1. The column alone does not prevent lost updates: optimistic locking works only where the endpoint compares the client's version before writing and returns `409 Conflict` when it is stale. On `main`: sources update / delete, village update / verify / reject, alternate-name update, and geo enrichment with `expectedVersion`; these also increment it. Village and alternate-name soft deletes do not check or increment it |
+| `deleted_at` | Soft delete; rows are hidden, not removed. Tables without this column (for example `nearby_places`, the reference tables, `users` and `refresh_tokens`) are not soft-deleted |
 | `created_by_id`, `updated_by_id` | References to `users` (lines omitted above to keep the diagram readable) |
 | `source_id` | Reference to `sources` for provenance |
 
@@ -358,5 +358,6 @@ In the diagrams, `UK` marks a column that is unique on its own or part of a comp
 
 ## Referential rules
 
-- Every foreign key uses `ON DELETE RESTRICT`: a parent cannot be hard-deleted while rows reference it. Content is removed by soft delete instead.
+- Every foreign key uses `ON DELETE RESTRICT`: a parent cannot be hard-deleted while rows reference it.
+- Most content is removed by soft delete (`deleted_at`). The exception is `nearby_places`, which has no `deleted_at`: `DELETE /villages/:id/nearby/:relationId` (ADMIN only) removes the row, and the audit log keeps a copy of it in `before`.
 - Reference tables (`governorates`, `local_authorities`) have no `deleted_at`; see [ADR 0001](adr/0001-reference-tables-read-only.md).
