@@ -3,6 +3,16 @@ import { z } from 'zod';
 import { parsePagination } from '../../shared/pagination.js';
 export const villagePopulationParamsSchema = z.object({ villageId: z.uuid() });
 export const populationParamsSchema = z.object({ id: z.uuid() });
+export const createPopulationSchema = z.strictObject({
+ population: z.number().int().min(1).max(2147483647),
+ referenceYear: z.number().int().min(1800).max(2100),
+ sourceId: z.uuid(),
+ referenceDate: z.iso.datetime({ offset: true }).nullable().optional(),
+ isEstimate: z.boolean().default(false),
+ needsReview: z.boolean().default(false),
+ notes: z.string().trim().max(5000).nullable().optional(),
+});
+export type CreatePopulationInput = z.infer<typeof createPopulationSchema>;
 const bool = z.enum(['true', 'false']).transform(value => value === 'true');
 const year = z.union([z.string().trim().min(1), z.number()]).transform(Number).pipe(z.number().int().min(-2147483648).max(2147483647));
 export const listPopulationQuerySchema = z.object({

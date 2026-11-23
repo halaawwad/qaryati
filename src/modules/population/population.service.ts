@@ -1,10 +1,25 @@
 import { NotFoundError } from '../../shared/errors.js';
 import { buildPaginationMeta, parsePagination } from '../../shared/pagination.js';
 import { villageService } from '../villages/villages.service.js';
-import { populationRepository, type PopulationRepository } from './population.repository.js';
-import type { ListPopulationQuery } from './population.schemas.js';
+import { sourceService } from '../sources/sources.service.js';
+import { recordAudit } from '../audit/audit.service.js';
+import { populationRepository, type PopulationRepository, type PopulationCreateContext } from './population.repository.js';
+import type { CreatePopulationInput, ListPopulationQuery } from './population.schemas.js';
 export class PopulationService {
  constructor(private readonly repository: PopulationRepository = populationRepository, private readonly villages: Pick<typeof villageService, 'ensureExists'> = villageService) {}
+ async create(villageId: string, input: CreatePopulationInput, context: PopulationCreateContext) {
+  await this.villages.ensureExists(villageId);
+  await sourceService.getById(input.sourceId);
+  return this.repository.transaction(async client => {
+   await this.villages.ensureExists(villageId, client);
+   await sourceService.getById(input.sourceId, client);
+   const item = await this.repository.create(villageId, input, context, client);
+   await recordAudit({ entityType: 'PopulationRecord', entityId: item.id, action: 'CREATE', actorId: context.actorId, requestId: context.requestId, before: null,
+    after: { id: item.id, villageId: item.villageId, population: item.population, referenceYear: item.referenceYear, referenceDate: item.referenceDate?.toISOString() ?? null, sourceId: item.sourceId, isEstimate: item.isEstimate, isPreferred: item.isPreferred, needsReview: item.needsReview, notes: item.notes, verificationStatus: item.verificationStatus, version: item.version },
+   }, client);
+   return item;
+  });
+ }
  async list(villageId: string, query: ListPopulationQuery) {
   await this.villages.ensureExists(villageId);
   const pagination = parsePagination(query);

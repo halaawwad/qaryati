@@ -2,11 +2,49 @@ openapi: "3.0.3"
 info:
   title: Qaryati API - Population Records
   version: "1.0.0"
-  description: Public read-only population record endpoints. Paths include the API prefix.
+  description: Population record read and create endpoints. Paths include the API prefix.
 servers:
   - url: /
 paths:
   /api/v1/villages/{villageId}/population-records:
+    post:
+      operationId: createVillagePopulationRecord
+      summary: Create a population record
+      description: >-
+        Requires an EDITOR, REVIEWER or ADMIN bearer token. The village and source
+        must be active; any source verification status is accepted. A new record is
+        PENDING, version 1 and not preferred. Duplicate village/year/source records,
+        including soft-deleted records, produce a conflict. Creation and audit logging
+        are atomic. Reference date need not match the reference year.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: villageId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreatePopulationRecord' }
+      responses:
+        '201':
+          description: Population record created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/PopulationRecord' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+        '500': { $ref: '#/components/responses/Error' }
     get:
       operationId: listVillagePopulationRecords
       summary: List population records for a village
@@ -98,7 +136,21 @@ paths:
         '429': { $ref: '#/components/responses/Error' }
         '500': { $ref: '#/components/responses/Error' }
 components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
   schemas:
+    CreatePopulationRecord:
+      type: object
+      additionalProperties: false
+      required: [population, referenceYear, sourceId]
+      properties:
+        population: { type: integer, minimum: 1, maximum: 2147483647 }
+        referenceYear: { type: integer, minimum: 1800, maximum: 2100 }
+        sourceId: { type: string, format: uuid }
+        referenceDate: { type: string, format: date-time, nullable: true }
+        isEstimate: { type: boolean, default: false }
+        needsReview: { type: boolean, default: false }
+        notes: { type: string, maxLength: 5000, nullable: true, description: Trimmed before length validation. }
     VerificationStatus:
       type: string
       enum: [PENDING, VERIFIED, REJECTED]
@@ -155,12 +207,12 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
     NotFound:
-      description: Village or record is missing or soft-deleted, or the record belongs to a soft-deleted village.
+      description: Village, source, or record is missing or soft-deleted, or the record belongs to a soft-deleted village.
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
     Error:
-      description: Rate limit exceeded or unexpected application error.
+      description: Authentication, authorization, conflict, rate limit, or unexpected application error.
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
