@@ -1,8 +1,11 @@
+import { AuditAction } from '@prisma/client';
 import { NotFoundError } from '../../shared/errors.js';
 import { buildPaginationMeta, parsePagination, type PaginationMeta } from '../../shared/pagination.js';
 import { villageService } from '../villages/villages.service.js';
-import { facilitiesRepository, type FacilitiesDetails, type FacilitiesRepository } from './facilities.repository.js';
-import type { ListFacilitiesQuery } from './facilities.schemas.js';
+import { sourceService } from '../sources/sources.service.js';
+import { recordAudit } from '../audit/audit.service.js';
+import { facilitiesRepository, type FacilityCreateContext, type FacilitiesDetails, type FacilitiesRepository } from './facilities.repository.js';
+import type { CreateFacilityInput, ListFacilitiesQuery } from './facilities.schemas.js';
 
 export interface FacilitiesListResult {
   items: FacilitiesDetails[];
@@ -14,6 +17,30 @@ export class FacilitiesService {
     private readonly repository: FacilitiesRepository = facilitiesRepository,
     private readonly villages: Pick<typeof villageService, 'ensureExists'> = villageService,
   ) {}
+
+  async create(villageId: string, input: CreateFacilityInput, context: FacilityCreateContext): Promise<FacilitiesDetails> {
+    await this.villages.ensureExists(villageId);
+    // Sources owns reference visibility: any active source is usable, regardless of status.
+    await sourceService.getById(input.sourceId);
+    return this.repository.transaction(async client => {
+      // Recheck and lock in the same village/source order used by the other create APIs.
+      await this.villages.ensureExists(villageId, client);
+      await sourceService.getById(input.sourceId, client);
+      const item = await this.repository.create(villageId, input, context, client);
+      await recordAudit({
+        entityType: 'Facility', entityId: item.id, action: AuditAction.CREATE,
+        actorId: context.actorId, requestId: context.requestId, before: null,
+        // Snapshot persisted values, including coordinates rounded by PostgreSQL.
+        after: {
+          id: item.id, villageId: item.villageId, name: item.name, facilityType: item.facilityType,
+          description: item.description, sourceId: item.sourceId, asOfYear: item.asOfYear,
+          latitude: item.latitude, longitude: item.longitude,
+          verificationStatus: item.verificationStatus, version: item.version,
+        },
+      }, client);
+      return item;
+    });
+  }
 
   async list(villageId: string, query: ListFacilitiesQuery): Promise<FacilitiesListResult> {
     // Cross-module existence checks go through the Villages service.

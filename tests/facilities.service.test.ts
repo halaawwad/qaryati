@@ -17,6 +17,8 @@ const item: FacilitiesDetails = {
 
 describe('FacilitiesService', () => {
   const repo = {
+    transaction: vi.fn<FacilitiesRepository['transaction']>(),
+    create: vi.fn<FacilitiesRepository['create']>(),
     findMany: vi.fn<FacilitiesRepository['findMany']>(),
     findById: vi.fn<FacilitiesRepository['findById']>(),
   };
