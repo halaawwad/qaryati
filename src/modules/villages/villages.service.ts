@@ -7,7 +7,7 @@ import {
   type PlaceRelation,
   type Village,
 } from '@prisma/client';
-import { AppError, NotFoundError } from '../../shared/errors.js';
+import { AppError, ForbiddenError, NotFoundError, ValidationError } from '../../shared/errors.js';
 
 import { buildPaginationMeta, parsePagination, type PaginationMeta } from '../../shared/pagination.js';
 import {
@@ -26,12 +26,14 @@ import {
 import { unprocessable, versionConflict, villageNotFound } from './villages.errors.js';
 import { assertCanEdit } from './villages.permissions.js';
 import { villageAudit, type VillageAuditRecorder } from './villages.audit.js';
-import type {
-  CreateVillageInput,
-  ListVillagesQuery,
-  NearbyVillagesQuery,
-  UpdateVillageInput,
-  VillageVersionInput,
+import {
+  geoEnrichmentInputSchema,
+  type CreateVillageInput,
+  type GeoEnrichmentInput,
+  type ListVillagesQuery,
+  type NearbyVillagesQuery,
+  type UpdateVillageInput,
+  type VillageVersionInput,
 } from './villages.schemas.js';
 
 /** Who is making a change, for createdById/updatedById, the audit log and the edit permissions (role). */
@@ -41,6 +43,47 @@ export interface WriteActor {
   role: Role;
   requestId: string | null;
 }
+
+/** Like WriteActor, but userId is null for system jobs (e.g. a geo enrichment batch). */
+interface ChangeActor {
+  userId: string | null;
+  requestId: string | null;
+}
+
+/** Same shape as req.user, so an authenticated caller can pass it straight through. */
+export interface GeoEnrichmentActor {
+  id: string;
+  role: Role;
+}
+
+export interface GeoEnrichmentOptions {
+  /** null for a system job: updatedById and the audit actorId are then null. */
+  actor: GeoEnrichmentActor | null;
+  /** Required with overwrite. Without it, the version read inside the transaction is used. */
+  expectedVersion?: number;
+  requestId?: string | null;
+  /** Replace coordinates that are already set. REVIEWER or ADMIN only. */
+  overwrite?: boolean;
+}
+
+export interface GeoEnrichmentVillage {
+  id: string;
+  version: number;
+  latitude: number | null;
+  longitude: number | null;
+  geoDisplayName: string | null;
+  geoEnrichedAt: Date | null;
+  verificationStatus: VerificationStatus;
+}
+
+export type GeoEnrichmentResult =
+  | { status: 'applied'; village: GeoEnrichmentVillage }
+  | { status: 'skipped'; reason: 'COORDINATES_ALREADY_SET'; village: GeoEnrichmentVillage };
+
+const GEO_OVERWRITE_ROLES: ReadonlySet<Role> = new Set([Role.REVIEWER, Role.ADMIN]);
+
+/** Marks audit rows written by applyGeoEnrichment: `after.source`. */
+const GEO_AUDIT_SOURCE = 'geo-enrichment';
 
 const AUDIT_ENTITY_TYPE = 'village';
 
@@ -164,6 +207,23 @@ async function assertConsistent(
   if (changes.nameOriginSourceId && !(await writes.sourceExists(changes.nameOriginSourceId))) {
     throw unprocessable('SOURCE_NOT_FOUND', 'nameOriginSourceId', 'Source does not exist');
   }
+}
+
+function toGeoVillage(row: Village): GeoEnrichmentVillage {
+  return {
+    id: row.id,
+    version: row.version,
+    latitude: row.latitude?.toNumber() ?? null,
+    longitude: row.longitude?.toNumber() ?? null,
+    geoDisplayName: row.geoDisplayName,
+    geoEnrichedAt: row.geoEnrichedAt,
+    verificationStatus: row.verificationStatus,
+  };
+}
+
+// Either half counts: a partially set point is still something a person entered, so it is never overwritten silently.
+function hasCoordinates(row: Village): boolean {
+  return row.latitude !== null || row.longitude !== null;
 }
 
 export class VillageService {
@@ -302,6 +362,90 @@ export class VillageService {
     return this.setVerificationStatus(id, input.version, VerificationStatus.REJECTED, AuditAction.REJECT, actor);
   }
 
+  /**
+   * Writes geocoding results (coordinates and display name) onto a village, for the maps module.
+   * This is the only way geoDisplayName / geoEnrichedAt get written; nothing else should update villages directly.
+   * There is no route for it: the maps module calls it from code.
+   *
+   * Call the geocoder (Nominatim) BEFORE calling this, never from inside it: this runs in a database
+   * transaction, and a slow or failing HTTP call there would hold the row lock for the whole request.
+   *
+   * Rules, in the order they are checked:
+   * 1. input must be valid: latitude and longitude required and within range, geoDisplayName a string of at most
+   *    500 characters or null (default null). Otherwise 400 VALIDATION_ERROR. expectedVersion, if given, must be
+   *    a positive integer (400).
+   * 2. overwrite: true needs actor.role REVIEWER or ADMIN, else 403 (a system job, actor = null, can't overwrite),
+   *    and needs expectedVersion, else 400. Both are checked before touching the database.
+   * 3. The village must exist and not be soft-deleted, else 404 (also for an id that isn't a UUID).
+   * 4. If expectedVersion is given and differs from the stored version: 409 VERSION_CONFLICT.
+   * 5. If the village already has coordinates (either half) and overwrite is not true: nothing is written
+   *    (not even geoDisplayName), no version bump, no audit row; returns { status: 'skipped',
+   *    reason: 'COORDINATES_ALREADY_SET' } with the village as stored.
+   * 6. Otherwise it applies latitude, longitude, geoDisplayName and geoEnrichedAt = now, bumps version, resets
+   *    verificationStatus to PENDING (new data needs review) and sets updatedById to actor.id (null for a system job).
+   *    The update is guarded by the version read in steps 3-4: if someone else changed the village in the
+   *    meantime, it fails with 409 VERSION_CONFLICT instead of overwriting their edit.
+   * 7. The change is audited in the same transaction: entityType 'village', action UPDATE, before and after,
+   *    actorId = actor.id or null, and after.source = 'geo-enrichment'.
+   *
+   * Returns { status: 'applied', village } or { status: 'skipped', reason, village }.
+   */
+  async applyGeoEnrichment(
+    villageId: string,
+    input: GeoEnrichmentInput,
+    options: GeoEnrichmentOptions,
+  ): Promise<GeoEnrichmentResult> {
+    const parsed = geoEnrichmentInputSchema.safeParse(input);
+    if (!parsed.success) {
+      throw new ValidationError(
+        'Invalid geo enrichment input',
+        parsed.error.issues.map((issue) => ({ field: issue.path.map(String).join('.') || 'input', message: issue.message })),
+      );
+    }
+
+    const { actor, expectedVersion, requestId = null, overwrite = false } = options;
+    if (expectedVersion !== undefined && !(Number.isInteger(expectedVersion) && expectedVersion > 0)) {
+      throw new ValidationError('Invalid geo enrichment options', [
+        { field: 'expectedVersion', message: 'expectedVersion must be a positive integer' },
+      ]);
+    }
+    if (overwrite && (!actor || !GEO_OVERWRITE_ROLES.has(actor.role))) {
+      throw new ForbiddenError('Only reviewers and admins can overwrite existing coordinates');
+    }
+    if (overwrite && expectedVersion === undefined) {
+      throw new ValidationError('Invalid geo enrichment options', [
+        { field: 'expectedVersion', message: 'expectedVersion is required when overwrite is true' },
+      ]);
+    }
+    if (!UUID_PATTERN.test(villageId)) throw villageNotFound();
+
+    const changeActor: ChangeActor = { userId: actor?.id ?? null, requestId };
+    const { latitude, longitude, geoDisplayName } = parsed.data;
+
+    return this.repository.transaction(async (writes, tx): Promise<GeoEnrichmentResult> => {
+      const before = await writes.findById(villageId);
+      if (!before || before.deletedAt) throw villageNotFound();
+      if (expectedVersion !== undefined && before.version !== expectedVersion) throw versionConflict(before.version);
+
+      if (hasCoordinates(before) && !overwrite) {
+        return { status: 'skipped', reason: 'COORDINATES_ALREADY_SET', village: toGeoVillage(before) };
+      }
+
+      const after = await this.applyVersioned(
+        writes,
+        tx,
+        changeActor,
+        AuditAction.UPDATE,
+        before,
+        before.version,
+        { latitude, longitude, geoDisplayName, geoEnrichedAt: new Date(), verificationStatus: VerificationStatus.PENDING },
+        { source: GEO_AUDIT_SOURCE },
+      );
+
+      return { status: 'applied', village: toGeoVillage(after) };
+    });
+  }
+
   // A status change is a change too: it bumps version, so an editor holding the old version gets a 409
   // instead of silently editing a village that was just reviewed.
   private async setVerificationStatus(
@@ -340,16 +484,18 @@ export class VillageService {
   /**
    * Optimistic locking: the update only matches { id, version, deletedAt: null }. If a concurrent request
    * changed the row after loadForWrite, nothing matches, and a fresh read tells 404 (deleted) from 409.
+   * auditMeta is merged into the audit row's `after` (e.g. { source: 'geo-enrichment' }).
    */
   private async applyVersioned(
     writes: VillageWriteRepository,
     tx: Prisma.TransactionClient,
-    actor: WriteActor,
+    actor: ChangeActor,
     action: AuditAction,
     before: Village,
     version: number,
     changes: VillageChanges,
-  ): Promise<void> {
+    auditMeta?: Record<string, unknown>,
+  ): Promise<Village> {
     const changed = await writes.updateIfVersion(before.id, version, changes, actor.userId);
     if (changed === 0) {
       const current = await writes.findById(before.id);
@@ -358,16 +504,19 @@ export class VillageService {
     }
 
     const after = await writes.findById(before.id);
-    await this.recordAudit(tx, actor, action, before.id, before, after);
+    if (!after) throw villageNotFound();
+
+    await this.recordAudit(tx, actor, action, before.id, before, auditMeta ? { ...after, ...auditMeta } : after);
+    return after;
   }
 
   private recordAudit(
     tx: Prisma.TransactionClient,
-    actor: WriteActor,
+    actor: ChangeActor,
     action: AuditAction,
     entityId: string,
     before: Village | null,
-    after: Village | null,
+    after: unknown,
   ): Promise<void> {
     return this.audit.record(tx, {
       entityType: AUDIT_ENTITY_TYPE,
