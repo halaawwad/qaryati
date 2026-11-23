@@ -1,4 +1,4 @@
-import { AuditAction, Prisma, VerificationStatus, type Village } from '@prisma/client';
+import { AuditAction, Prisma, Role, VerificationStatus, type Village } from '@prisma/client';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { VillageAuditEntry, VillageAuditRecorder } from '../src/modules/villages/villages.audit.js';
 import type {
@@ -146,7 +146,7 @@ class FakeVillageStore implements VillageRepository, VillageWriteRepository {
     return { ...row };
   }
 
-  async updateIfVersion(id: string, expectedVersion: number, changes: VillageChanges, updatedById: string): Promise<number> {
+  async updateIfVersion(id: string, expectedVersion: number, changes: VillageChanges, updatedById: string | null): Promise<number> {
     this.beforeUpdate?.();
     const row = this.rows.get(id);
     if (!row || row.deletedAt || row.version !== expectedVersion) return 0;
@@ -365,6 +365,198 @@ describe('VillageService writes', () => {
       AuditAction.REJECT,
     ]);
     expect(audit.transactions.every((tx) => tx === fakeTx)).toBe(true);
+  });
+
+  describe('applyGeoEnrichment', () => {
+    const point = { latitude: 32.2211, longitude: 35.2544, geoDisplayName: 'Test Village, Nablus, Palestine' };
+    const reviewerActor = { id: 'reviewer-1', role: Role.REVIEWER };
+    const adminActor = { id: 'admin-1', role: Role.ADMIN };
+    const editorActor = { id: 'editor-1', role: Role.EDITOR };
+
+    it('fills an empty village as a system job: version + 1, PENDING, updatedById null, geoEnrichedAt set', async () => {
+      const id = await createVillage();
+
+      const result = await service.applyGeoEnrichment(id, point, { actor: null, requestId: 'batch-1' });
+
+      expect(result).toMatchObject({
+        status: 'applied',
+        village: {
+          id,
+          version: 2,
+          latitude: 32.2211,
+          longitude: 35.2544,
+          geoDisplayName: 'Test Village, Nablus, Palestine',
+          geoEnrichedAt: expect.any(Date),
+          verificationStatus: VerificationStatus.PENDING,
+        },
+      });
+      expect(store.rows.get(id)?.updatedById).toBeNull();
+      expect(store.rows.get(id)?.geoEnrichedAt).toBeInstanceOf(Date);
+    });
+
+    it('audits UPDATE in the same transaction with after.source = geo-enrichment, a null actor and the request id', async () => {
+      const id = await createVillage();
+
+      await service.applyGeoEnrichment(id, point, { actor: null, requestId: 'batch-1' });
+
+      expect(audit.entries).toHaveLength(2);
+      expect(audit.entries[1]).toMatchObject({
+        entityType: 'village',
+        entityId: id,
+        action: AuditAction.UPDATE,
+        actorId: null,
+        requestId: 'batch-1',
+        before: expect.objectContaining({ latitude: null, version: 1 }),
+        after: expect.objectContaining({ version: 2, geoDisplayName: point.geoDisplayName, source: 'geo-enrichment' }),
+      });
+      expect((audit.entries[1]?.before as Record<string, unknown>).source).toBeUndefined();
+      expect(audit.transactions[1]).toBe(fakeTx);
+    });
+
+    it('uses the actor id as updatedById and audit actor when an authenticated user calls it', async () => {
+      const id = await createVillage();
+
+      await service.applyGeoEnrichment(id, point, { actor: editorActor });
+
+      expect(store.rows.get(id)?.updatedById).toBe('editor-1');
+      expect(audit.entries[1]?.actorId).toBe('editor-1');
+    });
+
+    it('defaults geoDisplayName to null', async () => {
+      const id = await createVillage();
+
+      const result = await service.applyGeoEnrichment(id, { latitude: 32.1, longitude: 35.2 }, { actor: null });
+
+      expect(result.village.geoDisplayName).toBeNull();
+    });
+
+    it('skips a village that already has coordinates: nothing changes, no version bump, no audit', async () => {
+      const id = await createVillage({ latitude: 32.0, longitude: 35.0 });
+
+      const result = await service.applyGeoEnrichment(id, point, { actor: null });
+
+      expect(result).toEqual({
+        status: 'skipped',
+        reason: 'COORDINATES_ALREADY_SET',
+        village: expect.objectContaining({ version: 1, latitude: 32, longitude: 35, geoDisplayName: null, geoEnrichedAt: null }),
+      });
+      expect(store.rows.get(id)?.geoDisplayName).toBeNull();
+      expect(audit.entries.map((entry) => entry.action)).toEqual([AuditAction.CREATE]);
+    });
+
+    it('also skips when only one half of the point is set', async () => {
+      const id = await createVillage();
+      const row = store.rows.get(id);
+      if (row) row.latitude = new Prisma.Decimal(32);
+
+      const result = await service.applyGeoEnrichment(id, point, { actor: null });
+
+      expect(result).toMatchObject({ status: 'skipped', reason: 'COORDINATES_ALREADY_SET' });
+      expect(store.rows.get(id)?.longitude).toBeNull();
+      expect(audit.entries).toHaveLength(1);
+    });
+
+    it('returns 403 for overwrite by an EDITOR or by a system job, before touching the village', async () => {
+      const id = await createVillage({ latitude: 32.0, longitude: 35.0 });
+
+      await expect(
+        service.applyGeoEnrichment(id, point, { actor: editorActor, overwrite: true, expectedVersion: 1 }),
+      ).rejects.toMatchObject({ statusCode: 403, code: 'FORBIDDEN' });
+      await expect(
+        service.applyGeoEnrichment(id, point, { actor: null, overwrite: true, expectedVersion: 1 }),
+      ).rejects.toMatchObject({ statusCode: 403 });
+      expect(store.rows.get(id)?.version).toBe(1);
+      expect(audit.entries).toHaveLength(1);
+    });
+
+    it('returns 400 for overwrite without expectedVersion', async () => {
+      const id = await createVillage({ latitude: 32.0, longitude: 35.0 });
+
+      await expect(service.applyGeoEnrichment(id, point, { actor: reviewerActor, overwrite: true })).rejects.toMatchObject({
+        statusCode: 400,
+        code: 'VALIDATION_ERROR',
+        details: [{ field: 'expectedVersion', message: 'expectedVersion is required when overwrite is true' }],
+      });
+      expect(store.rows.get(id)?.latitude?.toNumber()).toBe(32);
+    });
+
+    it('overwrites as a REVIEWER with the right expectedVersion, and sends a VERIFIED village back to PENDING', async () => {
+      const id = await createVillage({ latitude: 32.0, longitude: 35.0 });
+      await service.verify(id, { version: 1 }, reviewer);
+
+      const result = await service.applyGeoEnrichment(id, point, { actor: reviewerActor, overwrite: true, expectedVersion: 2 });
+
+      expect(result).toMatchObject({
+        status: 'applied',
+        village: { version: 3, latitude: 32.2211, verificationStatus: VerificationStatus.PENDING },
+      });
+      expect(store.rows.get(id)?.updatedById).toBe('reviewer-1');
+      expect(audit.entries.map((entry) => [entry.action, entry.actorId])).toEqual([
+        [AuditAction.CREATE, 'editor-1'],
+        [AuditAction.VERIFY, 'reviewer-1'],
+        [AuditAction.UPDATE, 'reviewer-1'],
+      ]);
+      expect(audit.entries[2]?.after).toMatchObject({ source: 'geo-enrichment' });
+    });
+
+    it('lets an ADMIN overwrite too', async () => {
+      const id = await createVillage({ latitude: 32.0, longitude: 35.0 });
+
+      await expect(
+        service.applyGeoEnrichment(id, point, { actor: adminActor, overwrite: true, expectedVersion: 1 }),
+      ).resolves.toMatchObject({ status: 'applied', village: { version: 2, latitude: 32.2211 } });
+    });
+
+    it('returns 409 for a stale expectedVersion, and when a concurrent edit wins without one', async () => {
+      const id = await createVillage();
+      await service.update(id, { version: 1, nameEn: 'Edited' }, editor);
+
+      await expect(service.applyGeoEnrichment(id, point, { actor: null, expectedVersion: 1 })).rejects.toMatchObject({
+        statusCode: 409,
+        code: 'VERSION_CONFLICT',
+        details: [{ field: 'version', message: 'Current version is 2' }],
+      });
+
+      store.beforeUpdate = () => {
+        const row = store.rows.get(id);
+        if (row) row.version = 3;
+      };
+      await expect(service.applyGeoEnrichment(id, point, { actor: null })).rejects.toMatchObject({
+        code: 'VERSION_CONFLICT',
+        details: [{ field: 'version', message: 'Current version is 3' }],
+      });
+      expect(store.rows.get(id)?.latitude).toBeNull();
+      expect(audit.entries.map((entry) => entry.action)).toEqual([AuditAction.CREATE, AuditAction.UPDATE]);
+    });
+
+    it('returns 404 for a soft-deleted, missing or non-UUID village', async () => {
+      const id = await createVillage();
+      await service.remove(id, reviewer);
+
+      await expect(service.applyGeoEnrichment(id, point, { actor: null })).rejects.toBeInstanceOf(NotFoundError);
+      await expect(service.applyGeoEnrichment(missingVillageId, point, { actor: null })).rejects.toBeInstanceOf(NotFoundError);
+      await expect(service.applyGeoEnrichment('test-village', point, { actor: null })).rejects.toBeInstanceOf(NotFoundError);
+    });
+
+    it('rejects invalid input with 400 before reading the village', async () => {
+      const id = await createVillage();
+
+      for (const input of [
+        { latitude: 91, longitude: 35 },
+        { latitude: 32, longitude: -181 },
+        { latitude: 32 } as unknown as typeof point,
+        { latitude: Number.NaN, longitude: 35 },
+        { ...point, geoDisplayName: 'x'.repeat(501) },
+        { ...point, verificationStatus: 'VERIFIED' } as unknown as typeof point,
+      ]) {
+        await expect(service.applyGeoEnrichment(id, input, { actor: null })).rejects.toMatchObject({ statusCode: 400 });
+      }
+      await expect(service.applyGeoEnrichment(id, point, { actor: null, expectedVersion: 0 })).rejects.toMatchObject({
+        statusCode: 400,
+      });
+      expect(store.rows.get(id)?.version).toBe(1);
+      expect(audit.entries).toHaveLength(1);
+    });
   });
 
   it('maps a duplicate slug from the database to 409 SLUG_TAKEN', async () => {
