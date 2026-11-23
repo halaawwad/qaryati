@@ -221,9 +221,11 @@ const SORT_COLUMNS: Record<VillageSortField, Prisma.Sql> = {
  *
  * The queries below do NOT say ESCAPE '\' on purpose. A backslash is already PostgreSQL's default LIKE escape
  * character, so the clause would change nothing about the result, but writing it makes the planner stop using the
- * trigram indexes on villages: it falls back to a sequential scan (190-260 ms per statement on 20,000 villages,
- * against 8-13 ms with a BitmapOr over the indexes). Measured with EXPLAIN ANALYZE, with literal patterns and
- * with a bound parameter. Do not add the clause back without measuring again; see docs/performance.md.
+ * trigram indexes on villages: it falls back to a sequential scan. On 20,000 villages the count query took
+ * 190-270 ms with the clause, against 8-13 ms without it for a selective term and 110-130 ms for a common one
+ * (about 1,000 matches), where the plan is a BitmapOr over the indexes. Measured with EXPLAIN ANALYZE, with
+ * literal patterns and with a bound parameter. Do not add the clause back without measuring again; see
+ * docs/performance.md.
  */
 export function escapeLikePattern(term: string): string {
   return term.replace(/[\\%_]/g, '\\$&');
