@@ -1,0 +1,258 @@
+EXPLAIN (ANALYZE, BUFFERS) - village search, BEFORE trigram indexes
+Date: 2026-11-23   Code: perf/k6-village-search@03c0718 (main@14b819f merged)   Data: 20014 villages (20000 perf- seed=1), 26068 village_names, no search indexes
+
+The SQL was copied from the Postgres statement log (log_statement=all, set temporarily and reset), one real request
+per term to GET /api/v1/villages?search=..., and run here with the bound parameters inlined. A request may run
+more than one statement (count, page, and for some code paths an id lookup). Pager usage is off.
+
+=== environment ===
+PostgreSQL 16.15 on x86_64-pc-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit
+
+20014 villages
+26068 village_names
+
+village_names_created_by_id_idx  CREATE INDEX village_names_created_by_id_idx ON public.village_names USING btree (created_by_id)
+village_names_pkey  CREATE UNIQUE INDEX village_names_pkey ON public.village_names USING btree (id)
+village_names_source_id_idx  CREATE INDEX village_names_source_id_idx ON public.village_names USING btree (source_id)
+village_names_updated_by_id_idx  CREATE INDEX village_names_updated_by_id_idx ON public.village_names USING btree (updated_by_id)
+village_names_village_id_idx  CREATE INDEX village_names_village_id_idx ON public.village_names USING btree (village_id)
+villages_created_by_id_idx  CREATE INDEX villages_created_by_id_idx ON public.villages USING btree (created_by_id)
+villages_governorate_id_idx  CREATE INDEX villages_governorate_id_idx ON public.villages USING btree (governorate_id)
+villages_local_authority_id_idx  CREATE INDEX villages_local_authority_id_idx ON public.villages USING btree (local_authority_id)
+villages_name_origin_source_id_idx  CREATE INDEX villages_name_origin_source_id_idx ON public.villages USING btree (name_origin_source_id)
+villages_pcbs_code_key  CREATE UNIQUE INDEX villages_pcbs_code_key ON public.villages USING btree (pcbs_code)
+villages_pkey  CREATE UNIQUE INDEX villages_pkey ON public.villages USING btree (id)
+villages_slug_key  CREATE UNIQUE INDEX villages_slug_key ON public.villages USING btree (slug)
+villages_updated_by_id_idx  CREATE INDEX villages_updated_by_id_idx ON public.villages USING btree (updated_by_id)
+
+=== Arabic search (term: الزيتون) - statement 1 of 2 ===
+SELECT COUNT(*) AS "_count$_all" FROM (SELECT "public"."villages"."id" FROM "public"."villages" WHERE ("public"."villages"."deleted_at" IS NULL AND ("public"."villages"."name_ar" ILIKE '%الزيتون%' OR "public"."villages"."name_en" ILIKE '%الزيتون%' OR "public"."villages"."slug" ILIKE '%الزيتون%' OR EXISTS(SELECT "t0"."village_id" FROM "public"."village_names" AS "t0" WHERE ("t0"."deleted_at" IS NULL AND "t0"."name" ILIKE '%الزيتون%' AND ("public"."villages"."id") = ("t0"."village_id") AND "t0"."village_id" IS NOT NULL)))) OFFSET '0') AS "sub"
+
+                                                                              QUERY PLAN                                                                               
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=167843.05..167843.06 rows=1 width=8) (actual time=163.934..163.936 rows=1 loops=1)
+   Buffers: shared hit=1846
+   ->  Seq Scan on villages  (cost=0.00..167710.58 rows=10597 width=16) (actual time=73.472..163.649 rows=1362 loops=1)
+         Filter: ((deleted_at IS NULL) AND ((name_ar ~~* '%الزيتون%'::text) OR (name_en ~~* '%الزيتون%'::text) OR (slug ~~* '%الزيتون%'::text) OR (hashed SubPlan 2)))
+         Rows Removed by Filter: 18652
+         Buffers: shared hit=1846
+         SubPlan 2
+           ->  Seq Scan on village_names t0  (cost=0.00..1127.85 rows=191 width=16) (actual time=1.173..40.258 rows=327 loops=1)
+                 Filter: ((deleted_at IS NULL) AND (village_id IS NOT NULL) AND (name ~~* '%الزيتون%'::text))
+                 Rows Removed by Filter: 25741
+                 Buffers: shared hit=802
+ Planning:
+   Buffers: shared hit=268
+ Planning Time: 9.046 ms
+ JIT:
+   Functions: 18
+   Options: Inlining false, Optimization false, Expressions true, Deforming true
+   Timing: Generation 3.552 ms, Inlining 0.000 ms, Optimization 1.744 ms, Emission 30.047 ms, Total 35.343 ms
+ Execution Time: 209.252 ms
+(19 rows)
+
+
+=== Arabic search (term: الزيتون) - statement 2 of 2 ===
+SELECT "public"."villages"."id", "public"."villages"."slug", "public"."villages"."name_ar", "public"."villages"."name_en", "public"."villages"."latitude", "public"."villages"."longitude", "public"."villages"."verification_status"::text, "public"."villages"."governorate_id", "public"."villages"."local_authority_id" FROM "public"."villages" WHERE ("public"."villages"."deleted_at" IS NULL AND ("public"."villages"."name_ar" ILIKE '%الزيتون%' OR "public"."villages"."name_en" ILIKE '%الزيتون%' OR "public"."villages"."slug" ILIKE '%الزيتون%' OR EXISTS(SELECT "t0"."village_id" FROM "public"."village_names" AS "t0" WHERE ("t0"."deleted_at" IS NULL AND "t0"."name" ILIKE '%الزيتون%' AND ("public"."villages"."id") = ("t0"."village_id") AND "t0"."village_id" IS NOT NULL)))) ORDER BY "public"."villages"."name_ar" ASC, "public"."villages"."id" ASC LIMIT '20' OFFSET '0'
+
+                                                                                 QUERY PLAN                                                                                  
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=168045.55..168045.60 rows=20 width=162) (actual time=168.562..168.569 rows=20 loops=1)
+   Buffers: shared hit=1855
+   ->  Sort  (cost=168045.55..168072.04 rows=10597 width=162) (actual time=134.593..134.596 rows=20 loops=1)
+         Sort Key: villages.name_ar, villages.id
+         Sort Method: top-N heapsort  Memory: 31kB
+         Buffers: shared hit=1855
+         ->  Seq Scan on villages  (cost=0.00..167763.57 rows=10597 width=162) (actual time=43.607..132.963 rows=1362 loops=1)
+               Filter: ((deleted_at IS NULL) AND ((name_ar ~~* '%الزيتون%'::text) OR (name_en ~~* '%الزيتون%'::text) OR (slug ~~* '%الزيتون%'::text) OR (hashed SubPlan 2)))
+               Rows Removed by Filter: 18652
+               Buffers: shared hit=1849
+               SubPlan 2
+                 ->  Seq Scan on village_names t0  (cost=0.00..1127.85 rows=191 width=16) (actual time=1.154..41.387 rows=327 loops=1)
+                       Filter: ((deleted_at IS NULL) AND (village_id IS NOT NULL) AND (name ~~* '%الزيتون%'::text))
+                       Rows Removed by Filter: 25741
+                       Buffers: shared hit=802
+ Planning:
+   Buffers: shared hit=303
+ Planning Time: 8.773 ms
+ JIT:
+   Functions: 19
+   Options: Inlining false, Optimization false, Expressions true, Deforming true
+   Timing: Generation 3.791 ms, Inlining 0.000 ms, Optimization 1.591 ms, Emission 32.673 ms, Total 38.055 ms
+ Execution Time: 211.087 ms
+(23 rows)
+
+
+=== English search (term: Deir) - statement 1 of 2 ===
+SELECT COUNT(*) AS "_count$_all" FROM (SELECT "public"."villages"."id" FROM "public"."villages" WHERE ("public"."villages"."deleted_at" IS NULL AND ("public"."villages"."name_ar" ILIKE '%Deir%' OR "public"."villages"."name_en" ILIKE '%Deir%' OR "public"."villages"."slug" ILIKE '%Deir%' OR EXISTS(SELECT "t0"."village_id" FROM "public"."village_names" AS "t0" WHERE ("t0"."deleted_at" IS NULL AND "t0"."name" ILIKE '%Deir%' AND ("public"."villages"."id") = ("t0"."village_id") AND "t0"."village_id" IS NOT NULL)))) OFFSET '0') AS "sub"
+
+                                                                          QUERY PLAN                                                                          
+--------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=167847.75..167847.76 rows=1 width=8) (actual time=145.846..145.848 rows=1 loops=1)
+   Buffers: shared hit=1846
+   ->  Seq Scan on villages  (cost=0.00..167710.58 rows=10973 width=16) (actual time=68.292..145.511 rows=1950 loops=1)
+         Filter: ((deleted_at IS NULL) AND ((name_ar ~~* '%Deir%'::text) OR (name_en ~~* '%Deir%'::text) OR (slug ~~* '%Deir%'::text) OR (hashed SubPlan 2)))
+         Rows Removed by Filter: 18064
+         Buffers: shared hit=1846
+         SubPlan 2
+           ->  Seq Scan on village_names t0  (cost=0.00..1127.85 rows=2 width=16) (actual time=38.036..38.036 rows=0 loops=1)
+                 Filter: ((deleted_at IS NULL) AND (village_id IS NOT NULL) AND (name ~~* '%Deir%'::text))
+                 Rows Removed by Filter: 26068
+                 Buffers: shared hit=802
+ Planning:
+   Buffers: shared hit=268
+ Planning Time: 7.674 ms
+ JIT:
+   Functions: 18
+   Options: Inlining false, Optimization false, Expressions true, Deforming true
+   Timing: Generation 3.244 ms, Inlining 0.000 ms, Optimization 1.509 ms, Emission 28.591 ms, Total 33.344 ms
+ Execution Time: 188.309 ms
+(19 rows)
+
+
+=== English search (term: Deir) - statement 2 of 2 ===
+SELECT "public"."villages"."id", "public"."villages"."slug", "public"."villages"."name_ar", "public"."villages"."name_en", "public"."villages"."latitude", "public"."villages"."longitude", "public"."villages"."verification_status"::text, "public"."villages"."governorate_id", "public"."villages"."local_authority_id" FROM "public"."villages" WHERE ("public"."villages"."deleted_at" IS NULL AND ("public"."villages"."name_ar" ILIKE '%Deir%' OR "public"."villages"."name_en" ILIKE '%Deir%' OR "public"."villages"."slug" ILIKE '%Deir%' OR EXISTS(SELECT "t0"."village_id" FROM "public"."village_names" AS "t0" WHERE ("t0"."deleted_at" IS NULL AND "t0"."name" ILIKE '%Deir%' AND ("public"."villages"."id") = ("t0"."village_id") AND "t0"."village_id" IS NOT NULL)))) ORDER BY "public"."villages"."name_ar" ASC, "public"."villages"."id" ASC LIMIT '20' OFFSET '0'
+
+                                                                             QUERY PLAN                                                                             
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=168057.44..168057.49 rows=20 width=162) (actual time=154.006..154.013 rows=20 loops=1)
+   Buffers: shared hit=1855
+   ->  Sort  (cost=168057.44..168084.87 rows=10973 width=162) (actual time=115.554..115.557 rows=20 loops=1)
+         Sort Key: villages.name_ar, villages.id
+         Sort Method: top-N heapsort  Memory: 31kB
+         Buffers: shared hit=1855
+         ->  Seq Scan on villages  (cost=0.00..167765.45 rows=10973 width=162) (actual time=37.725..113.555 rows=1950 loops=1)
+               Filter: ((deleted_at IS NULL) AND ((name_ar ~~* '%Deir%'::text) OR (name_en ~~* '%Deir%'::text) OR (slug ~~* '%Deir%'::text) OR (hashed SubPlan 2)))
+               Rows Removed by Filter: 18064
+               Buffers: shared hit=1849
+               SubPlan 2
+                 ->  Seq Scan on village_names t0  (cost=0.00..1127.85 rows=2 width=16) (actual time=37.102..37.102 rows=0 loops=1)
+                       Filter: ((deleted_at IS NULL) AND (village_id IS NOT NULL) AND (name ~~* '%Deir%'::text))
+                       Rows Removed by Filter: 26068
+                       Buffers: shared hit=802
+ Planning:
+   Buffers: shared hit=303
+ Planning Time: 9.648 ms
+ JIT:
+   Functions: 19
+   Options: Inlining false, Optimization false, Expressions true, Deforming true
+   Timing: Generation 3.992 ms, Inlining 0.000 ms, Optimization 1.803 ms, Emission 36.884 ms, Total 42.679 ms
+ Execution Time: 198.015 ms
+(23 rows)
+
+
+=== alternate-name search (term: Bayt) - statement 1 of 2 ===
+SELECT COUNT(*) AS "_count$_all" FROM (SELECT "public"."villages"."id" FROM "public"."villages" WHERE ("public"."villages"."deleted_at" IS NULL AND ("public"."villages"."name_ar" ILIKE '%Bayt%' OR "public"."villages"."name_en" ILIKE '%Bayt%' OR "public"."villages"."slug" ILIKE '%Bayt%' OR EXISTS(SELECT "t0"."village_id" FROM "public"."village_names" AS "t0" WHERE ("t0"."deleted_at" IS NULL AND "t0"."name" ILIKE '%Bayt%' AND ("public"."villages"."id") = ("t0"."village_id") AND "t0"."village_id" IS NOT NULL)))) OFFSET '0') AS "sub"
+
+                                                                          QUERY PLAN                                                                          
+--------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=167835.71..167835.72 rows=1 width=8) (actual time=151.818..151.820 rows=1 loops=1)
+   Buffers: shared hit=1846
+   ->  Seq Scan on villages  (cost=0.00..167710.58 rows=10010 width=16) (actual time=70.793..151.499 rows=1993 loops=1)
+         Filter: ((deleted_at IS NULL) AND ((name_ar ~~* '%Bayt%'::text) OR (name_en ~~* '%Bayt%'::text) OR (slug ~~* '%Bayt%'::text) OR (hashed SubPlan 2)))
+         Rows Removed by Filter: 18021
+         Buffers: shared hit=1846
+         SubPlan 2
+           ->  Seq Scan on village_names t0  (cost=0.00..1127.85 rows=1889 width=16) (actual time=0.246..37.770 rows=1993 loops=1)
+                 Filter: ((deleted_at IS NULL) AND (village_id IS NOT NULL) AND (name ~~* '%Bayt%'::text))
+                 Rows Removed by Filter: 24075
+                 Buffers: shared hit=802
+ Planning:
+   Buffers: shared hit=268
+ Planning Time: 8.275 ms
+ JIT:
+   Functions: 18
+   Options: Inlining false, Optimization false, Expressions true, Deforming true
+   Timing: Generation 3.311 ms, Inlining 0.000 ms, Optimization 1.622 ms, Emission 30.110 ms, Total 35.043 ms
+ Execution Time: 197.529 ms
+(19 rows)
+
+
+=== alternate-name search (term: Bayt) - statement 2 of 2 ===
+SELECT "public"."villages"."id", "public"."villages"."slug", "public"."villages"."name_ar", "public"."villages"."name_en", "public"."villages"."latitude", "public"."villages"."longitude", "public"."villages"."verification_status"::text, "public"."villages"."governorate_id", "public"."villages"."local_authority_id" FROM "public"."villages" WHERE ("public"."villages"."deleted_at" IS NULL AND ("public"."villages"."name_ar" ILIKE '%Bayt%' OR "public"."villages"."name_en" ILIKE '%Bayt%' OR "public"."villages"."slug" ILIKE '%Bayt%' OR EXISTS(SELECT "t0"."village_id" FROM "public"."village_names" AS "t0" WHERE ("t0"."deleted_at" IS NULL AND "t0"."name" ILIKE '%Bayt%' AND ("public"."villages"."id") = ("t0"."village_id") AND "t0"."village_id" IS NOT NULL)))) ORDER BY "public"."villages"."name_ar" ASC, "public"."villages"."id" ASC LIMIT '20' OFFSET '0'
+
+                                                                             QUERY PLAN                                                                             
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=168027.00..168027.05 rows=20 width=162) (actual time=161.421..161.428 rows=20 loops=1)
+   Buffers: shared hit=1855
+   ->  Sort  (cost=168027.00..168052.02 rows=10010 width=162) (actual time=123.411..123.415 rows=20 loops=1)
+         Sort Key: villages.name_ar, villages.id
+         Sort Method: top-N heapsort  Memory: 31kB
+         Buffers: shared hit=1855
+         ->  Seq Scan on villages  (cost=0.00..167760.63 rows=10010 width=162) (actual time=39.201..121.140 rows=1993 loops=1)
+               Filter: ((deleted_at IS NULL) AND ((name_ar ~~* '%Bayt%'::text) OR (name_en ~~* '%Bayt%'::text) OR (slug ~~* '%Bayt%'::text) OR (hashed SubPlan 2)))
+               Rows Removed by Filter: 18021
+               Buffers: shared hit=1849
+               SubPlan 2
+                 ->  Seq Scan on village_names t0  (cost=0.00..1127.85 rows=1889 width=16) (actual time=0.270..37.110 rows=1993 loops=1)
+                       Filter: ((deleted_at IS NULL) AND (village_id IS NOT NULL) AND (name ~~* '%Bayt%'::text))
+                       Rows Removed by Filter: 24075
+                       Buffers: shared hit=802
+ Planning:
+   Buffers: shared hit=303
+ Planning Time: 12.362 ms
+ JIT:
+   Functions: 19
+   Options: Inlining false, Optimization false, Expressions true, Deforming true
+   Timing: Generation 4.209 ms, Inlining 0.000 ms, Optimization 1.916 ms, Emission 36.373 ms, Total 42.498 ms
+ Execution Time: 209.140 ms
+(23 rows)
+
+
+=== no-match search (term: zzqnomatch) - statement 1 of 2 ===
+SELECT COUNT(*) AS "_count$_all" FROM (SELECT "public"."villages"."id" FROM "public"."villages" WHERE ("public"."villages"."deleted_at" IS NULL AND ("public"."villages"."name_ar" ILIKE '%zzqnomatch%' OR "public"."villages"."name_en" ILIKE '%zzqnomatch%' OR "public"."villages"."slug" ILIKE '%zzqnomatch%' OR EXISTS(SELECT "t0"."village_id" FROM "public"."village_names" AS "t0" WHERE ("t0"."deleted_at" IS NULL AND "t0"."name" ILIKE '%zzqnomatch%' AND ("public"."villages"."id") = ("t0"."village_id") AND "t0"."village_id" IS NOT NULL)))) OFFSET '0') AS "sub"
+
+                                                                                   QUERY PLAN                                                                                   
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=167835.71..167835.72 rows=1 width=8) (actual time=157.315..157.317 rows=1 loops=1)
+   Buffers: shared hit=1846
+   ->  Seq Scan on villages  (cost=0.00..167710.58 rows=10010 width=16) (actual time=157.265..157.266 rows=0 loops=1)
+         Filter: ((deleted_at IS NULL) AND ((name_ar ~~* '%zzqnomatch%'::text) OR (name_en ~~* '%zzqnomatch%'::text) OR (slug ~~* '%zzqnomatch%'::text) OR (hashed SubPlan 2)))
+         Rows Removed by Filter: 20014
+         Buffers: shared hit=1846
+         SubPlan 2
+           ->  Seq Scan on village_names t0  (cost=0.00..1127.85 rows=2 width=16) (actual time=40.578..40.578 rows=0 loops=1)
+                 Filter: ((deleted_at IS NULL) AND (village_id IS NOT NULL) AND (name ~~* '%zzqnomatch%'::text))
+                 Rows Removed by Filter: 26068
+                 Buffers: shared hit=802
+ Planning:
+   Buffers: shared hit=268
+ Planning Time: 14.029 ms
+ JIT:
+   Functions: 18
+   Options: Inlining false, Optimization false, Expressions true, Deforming true
+   Timing: Generation 3.229 ms, Inlining 0.000 ms, Optimization 1.619 ms, Emission 29.910 ms, Total 34.758 ms
+ Execution Time: 203.026 ms
+(19 rows)
+
+
+=== no-match search (term: zzqnomatch) - statement 2 of 2 ===
+SELECT "public"."villages"."id", "public"."villages"."slug", "public"."villages"."name_ar", "public"."villages"."name_en", "public"."villages"."latitude", "public"."villages"."longitude", "public"."villages"."verification_status"::text, "public"."villages"."governorate_id", "public"."villages"."local_authority_id" FROM "public"."villages" WHERE ("public"."villages"."deleted_at" IS NULL AND ("public"."villages"."name_ar" ILIKE '%zzqnomatch%' OR "public"."villages"."name_en" ILIKE '%zzqnomatch%' OR "public"."villages"."slug" ILIKE '%zzqnomatch%' OR EXISTS(SELECT "t0"."village_id" FROM "public"."village_names" AS "t0" WHERE ("t0"."deleted_at" IS NULL AND "t0"."name" ILIKE '%zzqnomatch%' AND ("public"."villages"."id") = ("t0"."village_id") AND "t0"."village_id" IS NOT NULL)))) ORDER BY "public"."villages"."name_ar" ASC, "public"."villages"."id" ASC LIMIT '20' OFFSET '0'
+
+                                                                                      QUERY PLAN                                                                                      
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=168027.00..168027.05 rows=20 width=162) (actual time=159.115..159.117 rows=0 loops=1)
+   Buffers: shared hit=1852
+   ->  Sort  (cost=168027.00..168052.02 rows=10010 width=162) (actual time=124.302..124.303 rows=0 loops=1)
+         Sort Key: villages.name_ar, villages.id
+         Sort Method: quicksort  Memory: 25kB
+         Buffers: shared hit=1852
+         ->  Seq Scan on villages  (cost=0.00..167760.63 rows=10010 width=162) (actual time=124.056..124.057 rows=0 loops=1)
+               Filter: ((deleted_at IS NULL) AND ((name_ar ~~* '%zzqnomatch%'::text) OR (name_en ~~* '%zzqnomatch%'::text) OR (slug ~~* '%zzqnomatch%'::text) OR (hashed SubPlan 2)))
+               Rows Removed by Filter: 20014
+               Buffers: shared hit=1846
+               SubPlan 2
+                 ->  Seq Scan on village_names t0  (cost=0.00..1127.85 rows=2 width=16) (actual time=43.315..43.315 rows=0 loops=1)
+                       Filter: ((deleted_at IS NULL) AND (village_id IS NOT NULL) AND (name ~~* '%zzqnomatch%'::text))
+                       Rows Removed by Filter: 26068
+                       Buffers: shared hit=802
+ Planning:
+   Buffers: shared hit=303
+ Planning Time: 8.640 ms
+ JIT:
+   Functions: 19
+   Options: Inlining false, Optimization false, Expressions true, Deforming true
+   Timing: Generation 4.360 ms, Inlining 0.000 ms, Optimization 1.592 ms, Emission 33.418 ms, Total 39.370 ms
+ Execution Time: 204.007 ms
+(23 rows)
+
