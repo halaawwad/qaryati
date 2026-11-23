@@ -15,6 +15,7 @@ import {
   type VillageWriteRepository,
 } from './villages.repository.js';
 import { villageAudit, type VillageAuditRecorder } from './villages.audit.js';
+import { assertCanEdit } from './villages.permissions.js';
 import { unprocessable, versionConflict, villageNotFound } from './villages.errors.js';
 import type { CreateNearbyPlaceInput, CreateVillageNameInput, UpdateVillageNameInput } from './villages.schemas.js';
 import type { WriteActor } from './villages.service.js';
@@ -163,6 +164,9 @@ export class VillageRelationsService {
     return this.repository.transaction(async (writes, tx) => {
       await ensureVillageActive(this.repository, tx, villageId);
       const before = await loadName(writes, villageId, nameId);
+      // 404 (above), then 403, then 409: the same order as for a village. An editor may only edit a name they
+      // created that is still PENDING; adding a name and the nearby places are not subject to this rule.
+      assertCanEdit(before, actor, 'alternate name');
       if (before.version !== version) throw versionConflict(before.version, 'village name');
 
       await assertNameRules(writes, villageId, changes, before);
