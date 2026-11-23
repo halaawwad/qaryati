@@ -1,0 +1,15 @@
+import { VerificationStatus } from '@prisma/client';
+import { z } from 'zod';
+import { parsePagination } from '../../shared/pagination.js';
+export const villagePopulationParamsSchema = z.object({ villageId: z.uuid() });
+export const populationParamsSchema = z.object({ id: z.uuid() });
+const bool = z.enum(['true', 'false']).transform(value => value === 'true');
+const year = z.union([z.string().trim().min(1), z.number()]).transform(Number).pipe(z.number().int().min(-2147483648).max(2147483647));
+export const listPopulationQuerySchema = z.object({
+ page: z.coerce.number().int().positive().optional(), limit: z.coerce.number().int().positive().optional(),
+ referenceYear: year.optional(), sourceId: z.uuid().optional(), isEstimate: bool.optional(), isPreferred: bool.optional(), needsReview: bool.optional(),
+ verificationStatus: z.enum(VerificationStatus).optional(), sort: z.enum(['referenceYear', 'population', 'createdAt', 'updatedAt']).optional(), order: z.enum(['asc', 'desc']).optional(),
+}).refine(q => { const {skip} = parsePagination(q); return Number.isSafeInteger(skip) && skip <= 2147483647; }, {path: ['page'], message: 'Pagination offset must not exceed 2147483647'});
+export type VillagePopulationParams = z.infer<typeof villagePopulationParamsSchema>;
+export type PopulationParams = z.infer<typeof populationParamsSchema>;
+export type ListPopulationQuery = z.infer<typeof listPopulationQuerySchema>;

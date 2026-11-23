@@ -6,6 +6,7 @@ import { facilitiesRouter, villageFacilitiesRouter } from './modules/facilities/
 import { governoratesRouter } from './modules/governorates/governorates.routes.js';
 import { heritageRouter, villageHeritageRouter } from './modules/heritage/heritage.routes.js';
 import { landmarksRouter, villageLandmarksRouter } from './modules/landmarks/landmarks.routes.js';
+import { populationRouter, villagePopulationRouter } from './modules/population/population.routes.js';
 import { villagesRouter } from './modules/villages/villages.routes.js';
 import { sourcesRouter } from './modules/sources/sources.routes.js';
 import { usersRouter } from './modules/users/users.routes.js';
@@ -63,4 +64,6 @@ router.use('/villages/:villageId/facilities', villageFacilitiesRouter);
 router.use('/economy', economyRouter);
 router.use('/villages/:villageId/economy', villageEconomyRouter);
 
+router.use('/population-records', populationRouter);
+router.use('/villages/:villageId/population-records', villagePopulationRouter);
 router.use('/villages', villagesRouter);

@@ -1,0 +1,20 @@
+import type { Express } from 'express';
+import request from 'supertest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { NotFoundError } from '../src/shared/errors.js';
+const service=vi.hoisted(()=>({list:vi.fn(),getById:vi.fn()}));
+vi.mock('../src/modules/population/population.service.js',()=>({populationService:service}));
+vi.mock('../src/shared/db.js',()=>({prisma:{}})); vi.mock('../src/shared/cache.js',()=>({redis:{}}));
+const id='11111111-1111-4111-8111-111111111111'; const list='/api/v1/villages/'+id+'/population-records'; const detail='/api/v1/population-records/'+id;
+let app: Express;
+beforeAll(async()=>{vi.stubEnv('NODE_ENV','test');vi.stubEnv('LOG_LEVEL','silent');vi.stubEnv('DATABASE_URL','postgresql://user:pass@localhost:5432/db');vi.stubEnv('REDIS_URL','redis://localhost:6379');vi.stubEnv('JWT_ACCESS_SECRET','test-secret-with-at-least-32-characters');app=(await import('../src/app.js')).createApp();});
+beforeEach(()=>{vi.resetAllMocks();service.list.mockResolvedValue({items:[{id}],meta:{total:1}});service.getById.mockResolvedValue({id});});
+describe('population routes',()=>{
+ it('serves public list with parsed filters',async()=>{const r=await request(app).get(list).query({referenceYear:'2021',isEstimate:'false'});expect(r.status).toBe(200);expect(r.body).toEqual({data:[{id}],meta:{total:1}});expect(service.list).toHaveBeenCalledWith(id,{referenceYear:2021,isEstimate:false});});
+ it('serves public detail',async()=>{const r=await request(app).get(detail);expect(r.status).toBe(200);expect(r.body).toEqual({data:{id}});});
+ it('passes false flags, source, status and sorting to the service',async()=>{const r=await request(app).get(list).query({isEstimate:'false',isPreferred:'false',needsReview:'false',sourceId:id,verificationStatus:'VERIFIED',sort:'population',order:'asc'});expect(r.status).toBe(200);expect(service.list).toHaveBeenCalledWith(id,{isEstimate:false,isPreferred:false,needsReview:false,sourceId:id,verificationStatus:'VERIFIED',sort:'population',order:'asc'});});
+ it('rejects offsets above the maximum',async()=>{expect((await request(app).get(list).query({page:'2147483649',limit:'1'})).status).toBe(400);expect(service.list).not.toHaveBeenCalled();});
+ it.each(['/api/v1/villages/bad/population-records','/api/v1/population-records/bad',list+'?needsReview=maybe'] )('rejects invalid input %s',async path=>{expect((await request(app).get(path)).status).toBe(400);expect(service.list).not.toHaveBeenCalled();expect(service.getById).not.toHaveBeenCalled();});
+ it.each([list,detail])('returns 404 %s',async path=>{service.list.mockRejectedValue(new NotFoundError());service.getById.mockRejectedValue(new NotFoundError());expect((await request(app).get(path)).status).toBe(404);});
+ it.each(['post','patch','delete'] as const)('does not expose %s',async method=>{for(const path of [list,detail]) expect((await request(app)[method](path).send({})).status).toBe(404);});
+});

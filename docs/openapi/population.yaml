@@ -1,0 +1,166 @@
+openapi: "3.0.3"
+info:
+  title: Qaryati API - Population Records
+  version: "1.0.0"
+  description: Public read-only population record endpoints. Paths include the API prefix.
+servers:
+  - url: /
+paths:
+  /api/v1/villages/{villageId}/population-records:
+    get:
+      operationId: listVillagePopulationRecords
+      summary: List population records for a village
+      description: >-
+        Returns active records for an active village, including records whose source is
+        soft-deleted and records of all verification statuses. Unknown query keys are
+        ignored. A valid page beyond the last result returns an empty array. An
+        effective pagination offset exceeding 2147483647 returns HTTP 400. The
+        count and page are read from the same database snapshot.
+      security: []
+      parameters:
+        - name: villageId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: limit
+          in: query
+          description: Values above 100 are capped at 100.
+          schema: { type: integer, minimum: 1, default: 20 }
+        - name: referenceYear
+          in: query
+          description: Signed 32-bit exact-match read filter; this is not the valid range for writing population records (1800–2100).
+          schema: { type: integer, format: int32 }
+        - name: sourceId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: isEstimate
+          in: query
+          schema: { type: string, enum: ["true", "false"] }
+        - name: isPreferred
+          in: query
+          schema: { type: string, enum: ["true", "false"] }
+        - name: needsReview
+          in: query
+          schema: { type: string, enum: ["true", "false"] }
+        - name: verificationStatus
+          in: query
+          schema: { $ref: '#/components/schemas/VerificationStatus' }
+        - name: sort
+          in: query
+          description: ID ascending is appended as a stable tie-breaker.
+          schema: { type: string, enum: [referenceYear, population, createdAt, updatedAt], default: referenceYear }
+        - name: order
+          in: query
+          schema: { type: string, enum: [asc, desc], default: desc }
+      responses:
+        '200':
+          description: Page of population records.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/PopulationRecord' }
+                  meta: { $ref: '#/components/schemas/PaginationMeta' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/Error' }
+        '500': { $ref: '#/components/responses/Error' }
+  /api/v1/population-records/{id}:
+    get:
+      operationId: getPopulationRecord
+      summary: Get a population record
+      description: Returns an active record belonging to an active village, regardless of source deletion or verification status.
+      security: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Population record.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/PopulationRecord' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/Error' }
+        '500': { $ref: '#/components/responses/Error' }
+components:
+  schemas:
+    VerificationStatus:
+      type: string
+      enum: [PENDING, VERIFIED, REJECTED]
+    PopulationRecord:
+      type: object
+      required: [id, villageId, population, referenceYear, referenceDate, sourceId, isEstimate, isPreferred, needsReview, notes, verificationStatus, version, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        villageId: { type: string, format: uuid }
+        population: { type: integer, format: int32 }
+        referenceYear: { type: integer, format: int32 }
+        referenceDate: { type: string, format: date-time, nullable: true }
+        sourceId: { type: string, format: uuid, description: Retained even when the source is soft-deleted. }
+        isEstimate: { type: boolean }
+        isPreferred: { type: boolean }
+        needsReview: { type: boolean }
+        notes: { type: string, nullable: true }
+        verificationStatus: { $ref: '#/components/schemas/VerificationStatus' }
+        version: { type: integer }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    PaginationMeta:
+      type: object
+      required: [page, limit, total, totalPages, hasNextPage, hasPrevPage]
+      properties:
+        page: { type: integer }
+        limit: { type: integer }
+        total: { type: integer }
+        totalPages: { type: integer }
+        hasNextPage: { type: boolean }
+        hasPrevPage: { type: boolean }
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, details, requestId]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            details:
+              type: array
+              items:
+                type: object
+                properties:
+                  field: { type: string }
+                  message: { type: string }
+            requestId: { type: string }
+  responses:
+    ValidationError:
+      description: Invalid path or query parameters.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    NotFound:
+      description: Village or record is missing or soft-deleted, or the record belongs to a soft-deleted village.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    Error:
+      description: Rate limit exceeded or unexpected application error.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
