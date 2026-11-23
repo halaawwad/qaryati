@@ -272,7 +272,7 @@ Shared columns on content tables:
 | `source_id` | Reference to `sources` for provenance |
 
 `population_records` also has `verified_by_id` referencing `users`, and requires a `source_id`.
-Its unique key is (`village_id`, `reference_year`, `source_id`): several sources can report the same year, and a reviewer marks one as `is_preferred`.
+Its unique key is (`village_id`, `reference_year`, `source_id`): several sources can report the same year. The database allows at most one record with `is_preferred = true` per village and year (see below). Choosing the preferred record, verification and the automatic `needs_review` flag are planned workflows; only the table and its constraints are on `main`.
 
 ## 3. Users, authentication, audit and change requests
 
@@ -330,8 +330,31 @@ erDiagram
 ```
 
 - `refresh_tokens` stores only a SHA-256 hash of each token; rotation revokes the old row.
-- `audit_logs` is append-only (no `updated_at`). `entity_type` + `entity_id` point to any table, so they are not foreign keys.
-- `change_requests` uses the same polymorphic `entity_type` + `entity_id`, plus `base_version` to detect edits made in the meantime.
+- `audit_logs` has no `updated_at`, and the application only inserts into it: there is no code path that updates or deletes audit rows. The database does not enforce this (no trigger or revoked permission). `entity_type` + `entity_id` point to any table, so they are not foreign keys.
+- `change_requests` uses the same polymorphic `entity_type` + `entity_id`, plus `base_version` to detect edits made in the meantime. Only the table exists on `main`; the change request endpoints are planned.
+
+## Constraints and indexes
+
+Besides primary and foreign keys, the database enforces these rules. The last four groups are written by hand in the `init` migration, because Prisma cannot express them in `schema.prisma`.
+
+| Table | Rule | Kind |
+|---|---|---|
+| `users` | `email` unique | Unique index |
+| `refresh_tokens` | `token_hash` unique | Unique index |
+| `governorates` | `name_ar`, `name_en` and `code` each unique | Unique indexes |
+| `local_authorities` | (`governorate_id`, `name_ar`) unique | Composite unique index |
+| `villages` | `slug` unique; `pcbs_code` unique when set | Unique indexes |
+| `nearby_places` | (`village_id`, `place_name`) unique | Composite unique index |
+| `population_records` | (`village_id`, `reference_year`, `source_id`) unique | Composite unique index |
+| `population_records` | **At most one preferred record per village and year**: unique (`village_id`, `reference_year`) `WHERE is_preferred = true` | Partial unique index (`population_records_one_preferred_per_year_idx`) |
+| `nearby_places` | A village pair is stored once, in either direction: unique (`LEAST(village_id, related_village_id)`, `GREATEST(...)`) `WHERE related_village_id IS NOT NULL` | Expression unique index (`nearby_places_unique_village_pair_idx`) |
+| `nearby_places` | A village cannot be near itself: `related_village_id IS NULL OR village_id <> related_village_id` | Check constraint |
+| `population_records` | `population > 0`; `reference_year BETWEEN 1800 AND 2100` | Check constraints |
+| `villages`, `landmarks`, `facilities` | `latitude` between -90 and 90, `longitude` between -180 and 180 (or null) | Check constraints |
+
+Every foreign key column has its own index (for example `villages.governorate_id`, `landmarks.source_id`, `*.created_by_id`), and `audit_logs` is indexed on (`entity_type`, `entity_id`), `actor_id` and `created_at`.
+
+In the diagrams, `UK` marks a column that is unique on its own or part of a composite unique key; the table above says which.
 
 ## Referential rules
 

@@ -3,7 +3,7 @@
 Qaryati is a **modular monolith**: one Node.js + Express + TypeScript service, split into feature modules that each own their routes, logic and data access ([ADR 0003](adr/0003-modular-monolith.md)).
 It runs with PostgreSQL and Redis through Docker Compose. Database tables are described in [erd.md](erd.md).
 
-Items marked *planned* are agreed in the team guide but not merged yet.
+Items marked *planned* are agreed in the team guide but not merged into `main` yet. This page describes `main` as of 2026-11-23.
 
 ## 1. System context
 
@@ -53,7 +53,7 @@ flowchart TB
     end
     subgraph sara["Provenance and review"]
         sources[sources]
-        audit["audit<br/>recordAudit() used by every write"]
+        audit["audit<br/>recordAudit()"]
         population["population<br/>(planned)"]
         changes["change-requests<br/>(planned)"]
     end
@@ -97,9 +97,13 @@ flowchart LR
 |---|---|
 | `*.routes.ts` | Declares endpoints and their middleware chain |
 | `*.controller.ts` | Reads the validated request, calls the service, sends the response. No business logic |
-| `*.service.ts` | Rules such as "village must exist", version checks, audit logging |
-| `*.repository.ts` | The only layer that talks to the database |
+| `*.service.ts` | Rules such as "village must exist", version checks, and calling `recordAudit()` |
+| `*.repository.ts` | Talks to the database |
 | `*.schemas.ts` | zod schemas for params, query and body |
+
+Exceptions to the layering:
+- `GET /api/v1/health` lives in `src/routes.ts` and calls Prisma (`SELECT 1`) and Redis (`PING`) directly, without a module or repository, because it only checks that the dependencies answer.
+- `sources` and `users` call `recordAudit()` from their repository, inside the same transaction as the write; `landmarks`, `economy` and `facilities` call it from the service with the transaction client.
 
 ## 4. Request lifecycle
 
@@ -109,31 +113,38 @@ A write request, for example `POST /api/v1/villages/:villageId/landmarks`:
 sequenceDiagram
     autonumber
     participant C as Client
-    participant M as Middlewares
-    participant R as Route + validate
+    participant M as App middlewares
     participant A as authenticate + requireRole
-    participant S as Service
+    participant V as validate
+    participant S as Controller + service
     participant DB as PostgreSQL
     participant E as errorHandler
 
     C->>M: HTTP request
-    Note over M: requestId → pino-http logger → helmet → CORS<br/>→ JSON body (1 MB) → rate limit (Redis)
-    M->>R: /api/v1/...
-    R->>R: zod validates params / query / body
-    R->>A: valid input
-    A->>A: verify JWT, check role
-    A->>S: controller calls service
+    Note over M: requestId → pino-http logger → helmet → CORS<br/>→ JSON body (1 MB) → global rate limit (Redis)
+    M->>A: route matched under /api/v1
+    A->>A: verify JWT (401), then check role (403)
+    A->>V: signed in with an allowed role
+    V->>V: zod checks params / body (400)
+    V->>S: valid input
     S->>DB: BEGIN
     S->>DB: check parent rows (FOR SHARE)
     S->>DB: insert / update with version check
     S->>DB: recordAudit (same transaction)
     S->>DB: COMMIT
     S-->>C: 201 { "data": ... }
-    Note over R,E: Any thrown error goes to errorHandler
+    Note over A,E: Any error from any step goes to errorHandler
     E-->>C: { "error": { code, message, details, requestId } }
 ```
 
-Read endpoints are public and skip `authenticate`. A transaction makes the change and its audit row succeed or fail together.
+On write routes the order is `authenticate` → `requireRole(...)` → `validate(...)` → controller, so an anonymous or unauthorised request gets `401` / `403` before its body is checked. The `users` router applies `authenticate` and `requireRole('ADMIN')` once, to all its routes. Auth routes have no `authenticate`; `register`, `login` and `refresh` put their own rate limiter before `validate`.
+
+Which routes need a token:
+- **Public:** all content reads (villages, governorates, sources, events, landmarks, heritage, economy, facilities), `/health`, and `POST /auth/register`, `/auth/login`, `/auth/refresh`, `/auth/logout`.
+- **Signed in:** `GET /auth/me`, and every create / update on content (`EDITOR`, `REVIEWER`, `ADMIN`).
+- **`ADMIN` only:** `GET /users`, `GET /users/:id`, `PATCH /users/:id/role`, `PATCH /users/:id/status`, and deletes.
+
+Audit: content writes (sources, landmarks, economy, facilities) and user role / status changes write an audit row in the same transaction as the change, so both succeed or fail together. Auth actions (register, login, refresh, logout) do not write audit rows.
 
 ## 5. API conventions
 
@@ -146,8 +157,18 @@ Read endpoints are public and skip `authenticate`. A transaction makes the chang
 | Pagination | `page` (default 1), `limit` (default 20, capped at 100) |
 | Request ID | `X-Request-Id` header on every response; also in logs and audit rows |
 | Health | `GET /api/v1/health` returns `200` or `503` with `db` and `redis` status |
-| Roles | Visitor reads; `EDITOR` adds; `REVIEWER` verifies; `ADMIN` deletes and manages users |
+| Roles | Visitor reads; `EDITOR` adds (as `PENDING`); `REVIEWER` verifies or rejects; `ADMIN` also deletes and manages users. The full matrix is in the team guide |
 | Conflicts | Updates send the `version` they read; a stale version returns `409 CONFLICT` |
+
+### Merged vs planned workflows
+
+| Workflow | On `main` | Planned |
+|---|---|---|
+| Content creation (`PENDING`) with audit | sources, landmarks, economy, facilities | villages, population |
+| Verify / reject endpoints | — | villages, population, other content |
+| Population records (multiple sources per year) | Table and constraints only | Read and create endpoints, automatic `needs_review` |
+| Choosing the preferred population record | Table and constraint only (`is_preferred`) | Reviewer endpoint |
+| Change requests for edits to `VERIFIED` data | Table only | Endpoints and review flow |
 
 ## 6. Security
 
