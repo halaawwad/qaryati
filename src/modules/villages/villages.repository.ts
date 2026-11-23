@@ -3,12 +3,12 @@ import type {
   LocalAuthority,
   PlaceRelation,
   PlaceType,
-  Prisma,
   Source,
   VerificationStatus,
   Village,
   VillageName,
 } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
 import type { SortOrder, VillageSortField } from './villages.schemas.js';
 
@@ -195,25 +195,77 @@ function activeSource<T extends { deletedAt: Date | null }>(source: T | null): O
   return rest;
 }
 
-function buildWhere({ search, governorateId, localAuthorityId, verificationStatus }: VillageFilters): Prisma.VillageWhereInput {
-  const where: Prisma.VillageWhereInput = {
+// Filters without a search term. A search goes through findIdsBySearch instead (see there for why).
+function buildWhere({ governorateId, localAuthorityId, verificationStatus }: VillageFilters): Prisma.VillageWhereInput {
+  return {
     deletedAt: null,
     governorateId,
     localAuthorityId,
     verificationStatus,
   };
+}
 
-  if (search) {
-    const contains = { contains: search, mode: 'insensitive' } satisfies Prisma.StringFilter;
-    where.OR = [
-      { nameAr: contains },
-      { nameEn: contains },
-      { slug: contains },
-      { names: { some: { deletedAt: null, name: contains } } },
-    ];
+// Whitelisted sort columns for the raw search query (raw SQL can't take a column name as a bound value).
+const SORT_COLUMNS: Record<VillageSortField, Prisma.Sql> = {
+  nameAr: Prisma.sql`v.name_ar`,
+  nameEn: Prisma.sql`v.name_en`,
+  createdAt: Prisma.sql`v.created_at`,
+  elevationM: Prisma.sql`v.elevation_m`,
+  areaDunums: Prisma.sql`v.area_dunums`,
+};
+
+/**
+ * The ids of the villages that match a search term, one page of them, and the total.
+ *
+ * Why this is raw SQL: Prisma's `OR [nameAr, nameEn, slug, names some]` becomes
+ *   name_ar ILIKE .. OR name_en ILIKE .. OR slug ILIKE .. OR id IN (SELECT .. FROM village_names ..)
+ * and an OR that contains an IN-subquery cannot use the trigram indexes: Postgres falls back to a sequential
+ * scan of villages even when the indexes exist. Splitting it into a UNION lets each side use its own index
+ * (a BitmapOr over the three villages indexes, and a Bitmap scan of village_names).
+ *
+ * The result is the same as before: the pattern is `%term%` with no escaping of % or _, exactly what Prisma's
+ * `contains` sent, the filters apply to the village on both sides, and the order is the sort column then id.
+ * Everything is bound as a parameter except the whitelisted column and direction.
+ */
+async function findIdsBySearch({ filters, sort, skip, take }: VillageListParams): Promise<{ ids: string[]; total: number }> {
+  const pattern = `%${filters.search ?? ''}%`;
+
+  const conditions = [Prisma.sql`v.deleted_at IS NULL`];
+  if (filters.governorateId) conditions.push(Prisma.sql`v.governorate_id = ${filters.governorateId}::uuid`);
+  if (filters.localAuthorityId) conditions.push(Prisma.sql`v.local_authority_id = ${filters.localAuthorityId}::uuid`);
+  if (filters.verificationStatus) {
+    conditions.push(Prisma.sql`v.verification_status = ${filters.verificationStatus}::"VerificationStatus"`);
   }
+  const where = Prisma.join(conditions, ' AND ');
 
-  return where;
+  const matches = Prisma.sql`
+    SELECT v.id FROM villages v
+    WHERE ${where} AND (v.name_ar ILIKE ${pattern} OR v.name_en ILIKE ${pattern} OR v.slug ILIKE ${pattern})
+    UNION
+    SELECT v.id FROM village_names n
+    JOIN villages v ON v.id = n.village_id
+    WHERE ${where} AND n.deleted_at IS NULL AND n.name ILIKE ${pattern}
+  `;
+
+  const direction = sort.order === 'desc' ? Prisma.sql`DESC` : Prisma.sql`ASC`;
+  // Same as Prisma's `nulls: 'last'` for the nullable columns.
+  const nulls = NULLABLE_SORT_FIELDS.has(sort.field) ? Prisma.sql`NULLS LAST` : Prisma.empty;
+
+  const [countRows, idRows] = await prisma.$transaction([
+    prisma.$queryRaw<{ total: bigint }[]>`SELECT count(*) AS total FROM (${matches}) AS m`,
+    prisma.$queryRaw<{ id: string }[]>`
+      SELECT v.id FROM (${matches}) AS m
+      JOIN villages v ON v.id = m.id
+      ORDER BY ${SORT_COLUMNS[sort.field]} ${direction} ${nulls}, v.id ASC
+      LIMIT ${take} OFFSET ${skip}
+    `,
+  ]);
+
+  return { ids: idRows.map((row) => row.id), total: Number(countRows[0]?.total ?? 0) };
+}
+
+function toListItem(row: Prisma.VillageGetPayload<{ select: ReturnType<typeof villageListSelect> }>): VillageListItem {
+  return { ...row, latitude: toNumber(row.latitude), longitude: toNumber(row.longitude) };
 }
 
 function buildOrderBy({ field, order }: VillageListParams['sort']): Prisma.VillageOrderByWithRelationInput[] {
@@ -227,6 +279,16 @@ function buildOrderBy({ field, order }: VillageListParams['sort']): Prisma.Villa
 
 export const villageRepository: VillageRepository = {
   async findMany(params) {
+    if (params.filters.search) {
+      const { ids, total } = await findIdsBySearch(params);
+      if (ids.length === 0) return { items: [], total };
+
+      // The page is loaded with the same select as the list without a search, then put back in the sorted order.
+      const rows = await prisma.village.findMany({ where: { id: { in: ids } }, select: villageListSelect() });
+      const byId = new Map(rows.map((row) => [row.id, row]));
+      return { items: ids.flatMap((id) => byId.get(id) ?? []).map(toListItem), total };
+    }
+
     const where = buildWhere(params.filters);
 
     const [total, rows] = await prisma.$transaction([
@@ -240,13 +302,7 @@ export const villageRepository: VillageRepository = {
       }),
     ]);
 
-    const items = rows.map((row) => ({
-      ...row,
-      latitude: toNumber(row.latitude),
-      longitude: toNumber(row.longitude),
-    }));
-
-    return { items, total };
+    return { items: rows.map(toListItem), total };
   },
 
   async findDetails(lookup) {
