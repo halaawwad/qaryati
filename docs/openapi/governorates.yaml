@@ -1,0 +1,225 @@
+openapi: 3.0.3
+info:
+  title: Qaryati API - Governorates and Local Authorities
+  version: 1.0.0
+  description: |
+    Read-only reference data: the governorates of Palestine and the local authorities (municipalities,
+    village councils and project committees) inside each one. These tables are seeded and are not edited
+    through the API (see ADR-0001), so there are no write endpoints.
+
+    ## Access
+    All three endpoints are public. Responses are not paginated: they return `data` only, with no `meta`,
+    because the lists are short and bounded.
+
+    ## Counts
+    `villagesCount` counts only active villages; soft-deleted villages never count towards a governorate.
+
+    ## Errors
+    Every error uses the same envelope (`ErrorResponse`) with a machine-readable `code` and the request's
+    `requestId` (also returned in the `X-Request-Id` header). Requests over the rate limit return 429.
+servers:
+  - url: http://localhost:3000/api/v1
+    description: Local Docker (docker compose up)
+x-implementation-source:
+  ref: main
+  module: src/modules/governorates/
+tags:
+  - name: Governorates
+    description: Reference data, public.
+
+paths:
+  /governorates:
+    get:
+      tags: [Governorates]
+      summary: List governorates
+      operationId: listGovernorates
+      description: All governorates, ordered by English name, each with the number of active villages. Takes no query parameters (unknown ones are ignored).
+      security: []
+      responses:
+        '200':
+          description: All governorates.
+          headers:
+            X-Request-Id: { $ref: '#/components/headers/RequestId' }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Governorate' }
+              example:
+                data:
+                  - { id: 01000000-0000-4000-8000-000000000010, nameAr: بيت لحم, nameEn: Bethlehem, code: BTH, villagesCount: 42 }
+                  - { id: 01000000-0000-4000-8000-000000000004, nameAr: نابلس, nameEn: Nablus, code: NAB, villagesCount: 57 }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /governorates/{id}:
+    get:
+      tags: [Governorates]
+      summary: Get a governorate
+      operationId: getGovernorate
+      description: A governorate with the number of its active villages and of its local authorities. An unknown id returns 404.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/GovernorateId'
+      responses:
+        '200':
+          description: The governorate.
+          headers:
+            X-Request-Id: { $ref: '#/components/headers/RequestId' }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/GovernorateDetails' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '404': { $ref: '#/components/responses/GovernorateNotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /governorates/{id}/local-authorities:
+    get:
+      tags: [Governorates]
+      summary: List the local authorities of a governorate
+      operationId: listLocalAuthorities
+      description: |
+        The local authorities of the governorate, ordered by Arabic name, optionally filtered by `type`.
+        A governorate without matching local authorities returns 200 with an empty `data` array; an unknown
+        governorate returns 404. Unknown query keys are ignored.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/GovernorateId'
+        - name: type
+          in: query
+          description: Only local authorities of this type.
+          schema: { $ref: '#/components/schemas/LocalAuthorityType' }
+      responses:
+        '200':
+          description: The local authorities.
+          headers:
+            X-Request-Id: { $ref: '#/components/headers/RequestId' }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/LocalAuthority' }
+              example:
+                data:
+                  - id: 9c2a8f4e-0b6e-4c53-8d2e-6b1a1d0f4c77
+                    governorateId: 01000000-0000-4000-8000-000000000004
+                    nameAr: بلدية بيتا
+                    nameEn: Beita Municipality
+                    type: MUNICIPALITY
+                    sourceId: null
+                    asOfYear: 2023
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '404': { $ref: '#/components/responses/GovernorateNotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+components:
+  headers:
+    RequestId:
+      description: Request correlation id (also in the `requestId` of an error body).
+      schema: { type: string }
+
+  parameters:
+    GovernorateId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+
+  schemas:
+    LocalAuthorityType:
+      type: string
+      enum: [MUNICIPALITY, VILLAGE_COUNCIL, PROJECT_COMMITTEE]
+
+    Governorate:
+      type: object
+      required: [id, nameAr, nameEn, code, villagesCount]
+      properties:
+        id: { type: string, format: uuid }
+        nameAr: { type: string }
+        nameEn: { type: string }
+        code: { type: string, description: Short unique code of the governorate. }
+        villagesCount: { type: integer, minimum: 0, description: Number of active (not deleted) villages. }
+
+    GovernorateDetails:
+      allOf:
+        - $ref: '#/components/schemas/Governorate'
+        - type: object
+          required: [localAuthoritiesCount]
+          properties:
+            localAuthoritiesCount: { type: integer, minimum: 0 }
+
+    LocalAuthority:
+      type: object
+      required: [id, governorateId, nameAr, nameEn, type, sourceId, asOfYear]
+      properties:
+        id: { type: string, format: uuid }
+        governorateId: { type: string, format: uuid }
+        nameAr: { type: string }
+        nameEn: { type: string, nullable: true }
+        type: { $ref: '#/components/schemas/LocalAuthorityType' }
+        sourceId: { type: string, format: uuid, nullable: true, description: 'The source of the record, when known.' }
+        asOfYear: { type: integer, nullable: true, description: The year the data refers to. }
+
+    ErrorDetail:
+      type: object
+      required: [field, message]
+      properties:
+        field: { type: string }
+        message: { type: string }
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, details, requestId]
+          properties:
+            code:
+              type: string
+              description: Machine-readable code, e.g. VALIDATION_ERROR, NOT_FOUND, TOO_MANY_REQUESTS, INTERNAL_ERROR.
+            message: { type: string }
+            details:
+              type: array
+              items: { $ref: '#/components/schemas/ErrorDetail' }
+            requestId: { type: string }
+
+  responses:
+    ValidationError:
+      description: Invalid request (`VALIDATION_ERROR`), for example an id that is not a UUID or an unknown `type`.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          example:
+            error:
+              code: VALIDATION_ERROR
+              message: Request validation failed
+              details: [{ field: params.id, message: Invalid UUID }]
+              requestId: 1f2e-example
+    GovernorateNotFound:
+      description: The governorate does not exist (`NOT_FOUND`).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          example:
+            error: { code: NOT_FOUND, message: Governorate not found, details: [], requestId: 5a9c-example }
+    TooManyRequests:
+      description: Rate limit exceeded (`TOO_MANY_REQUESTS`).
+      headers:
+        Retry-After:
+          description: Seconds until the client may retry.
+          schema: { type: integer }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
