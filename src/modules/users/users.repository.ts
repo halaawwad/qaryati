@@ -1,9 +1,14 @@
 import { Prisma, type User } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
+import { recordAudit, type RecordAuditInput } from '../audit/audit.service.js';
 import type { ListUsersQuery, UserRole } from './users.schemas.js';
 
 export type UserDetails = Pick<User, 'id' | 'email' | 'fullName' | 'role' | 'isActive' | 'createdAt' | 'updatedAt'>;
 export type UserChange = { role: UserRole } | { isActive: boolean };
+export interface UserChangeContext {
+  actorId: string;
+  requestId: string;
+}
 export interface UserListParams {
   filters: Pick<ListUsersQuery, 'role' | 'isActive' | 'q'>;
   sort: { field: NonNullable<ListUsersQuery['sort']>; order: 'asc' | 'desc' };
@@ -15,6 +20,7 @@ export interface UserTransaction {
   countActiveAdmins(): Promise<number>;
   update(id: string, change: UserChange): Promise<UserDetails>;
   revokeRefreshTokens(userId: string): Promise<void>;
+  recordAudit(input: RecordAuditInput): Promise<void>;
 }
 export interface UserRepository extends UserTransaction {
   findMany(params: UserListParams): Promise<{ items: UserDetails[]; total: number }>;
@@ -40,6 +46,9 @@ function transactionRepository(client: Prisma.TransactionClient): UserTransactio
       await client.refreshToken.updateMany({
         where: { userId, revokedAt: null }, data: { revokedAt: new Date() },
       });
+    },
+    async recordAudit(input) {
+      await recordAudit(input, client);
     },
   };
 }

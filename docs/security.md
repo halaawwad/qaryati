@@ -26,3 +26,17 @@ If the rate-limit store fails, `passOnStoreError: true` allows requests and emit
 Set `RATE_LIMIT_ENABLED=false` for k6/load tests that send many requests from one IP. This disables every limiter, including the auth limiters, without creating rate-limit stores. Restore `true` for normal operation. Booleans accept only `true` or `false`; window lengths and maxima must be positive integers (windows are capped at Node's timer limit).
 
 Tests use isolated in-memory stores and require no Redis connection.
+
+## Dependency audit (npm audit)
+
+Fixed:
+- body-parser (via Express): DoS with compressed request bodies, updated with `npm audit fix`.
+- zod: memory exhaustion on oversized collections, updated from 4.6.5 to 4.6.7.
+
+Accepted (not fixed):
+- prisma → @prisma/config → deepmerge-ts and effect (4 high findings).
+- The only available fix is upgrading to Prisma 7, a breaking change; we deliberately pin Prisma 6.
+- These packages run only when the Prisma CLI loads our own configuration (e.g. `prisma migrate deploy` at container start). They never process user input, so the vulnerable code paths are not reachable by API clients.
+- Re-evaluate when upgrading Prisma.
+
+Never run `npm audit fix --force`: it upgrades major versions (including Prisma) without review.
