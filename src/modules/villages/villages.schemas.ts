@@ -1,4 +1,4 @@
-import { VerificationStatus } from '@prisma/client';
+import { PlaceRelation, PlaceType, VerificationStatus, VillageNameType } from '@prisma/client';
 import { z } from 'zod';
 
 export const VILLAGE_SORT_FIELDS = ['nameAr', 'nameEn', 'createdAt', 'elevationM', 'areaDunums'] as const;
@@ -101,6 +101,78 @@ export const villageVersionBodySchema = z.strictObject({
   version: z.number().int().positive(),
 });
 
+// --- Alternate names (village_names) ---
+
+export const villageNameParamsSchema = z.object({
+  id: z.uuid(),
+  nameId: z.uuid(),
+});
+
+// Only Arabic and English are shown and searched; any other code would store a name nobody can find.
+const nameLanguageSchema = z.enum(['ar', 'en']);
+
+const yearSchema = z.number().int().nullable().optional();
+
+// A period that ends before it starts is a data-entry mistake, so it is a 400, not a stored fact.
+// On updates the service repeats this check against the stored values (only one end may be sent).
+function periodInOrder(data: { periodFrom?: number | null; periodTo?: number | null }): boolean {
+  return data.periodFrom == null || data.periodTo == null || data.periodFrom <= data.periodTo;
+}
+
+const periodMessage = { message: 'periodFrom must be less than or equal to periodTo', path: ['periodFrom'] };
+
+const villageNameFields = {
+  name: z.string().trim().min(1).max(200),
+  language: nameLanguageSchema,
+  nameType: z.enum(VillageNameType),
+  periodFrom: yearSchema,
+  periodTo: yearSchema,
+  sourceId: z.uuid().nullable().optional(),
+};
+
+// strictObject keeps server-owned fields (id, villageId, verificationStatus, createdById, ...) out of the body.
+export const createVillageNameBodySchema = z.strictObject(villageNameFields).refine(periodInOrder, periodMessage);
+
+export const updateVillageNameBodySchema = z
+  .strictObject({
+    version: z.number().int().positive(),
+    name: villageNameFields.name.optional(),
+    language: villageNameFields.language.optional(),
+    nameType: villageNameFields.nameType.optional(),
+    periodFrom: villageNameFields.periodFrom,
+    periodTo: villageNameFields.periodTo,
+    sourceId: villageNameFields.sourceId,
+  })
+  .refine(periodInOrder, periodMessage)
+  .refine((data) => Object.keys(data).some((key) => key !== 'version'), {
+    message: 'At least one field to change is required besides version',
+  });
+
+// --- Nearby places (nearby_places) ---
+
+export const nearbyRelationParamsSchema = z.object({
+  id: z.uuid(),
+  relationId: z.uuid(),
+});
+
+const distanceKmSchema = z.number().positive().nullable().optional();
+
+// Two shapes: a relation to one of our villages (placeName and placeType are derived from it),
+// or a place we don't have a row for. strictObject makes a body that mixes both shapes a 400.
+export const createNearbyPlaceBodySchema = z.union([
+  z.strictObject({
+    relatedVillageId: z.uuid(),
+    relation: z.enum(PlaceRelation),
+    distanceKm: distanceKmSchema,
+  }),
+  z.strictObject({
+    placeName: z.string().trim().min(1).max(200),
+    placeType: z.enum(PlaceType),
+    relation: z.enum(PlaceRelation),
+    distanceKm: distanceKmSchema,
+  }),
+]);
+
 export type ListVillagesQuery = z.infer<typeof listVillagesQuerySchema>;
 export type VillageDetailsParams = z.infer<typeof villageDetailsParamsSchema>;
 export type NearbyVillagesQuery = z.infer<typeof nearbyVillagesQuerySchema>;
@@ -108,5 +180,10 @@ export type VillageIdParams = z.infer<typeof villageIdParamsSchema>;
 export type CreateVillageInput = z.infer<typeof createVillageBodySchema>;
 export type UpdateVillageInput = z.infer<typeof updateVillageBodySchema>;
 export type VillageVersionInput = z.infer<typeof villageVersionBodySchema>;
+export type VillageNameParams = z.infer<typeof villageNameParamsSchema>;
+export type CreateVillageNameInput = z.infer<typeof createVillageNameBodySchema>;
+export type UpdateVillageNameInput = z.infer<typeof updateVillageNameBodySchema>;
+export type NearbyRelationParams = z.infer<typeof nearbyRelationParamsSchema>;
+export type CreateNearbyPlaceInput = z.infer<typeof createNearbyPlaceBodySchema>;
 export type VillageSortField = (typeof VILLAGE_SORT_FIELDS)[number];
 export type SortOrder = 'asc' | 'desc';

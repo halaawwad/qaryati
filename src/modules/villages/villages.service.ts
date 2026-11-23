@@ -23,6 +23,8 @@ import {
   type VillageWriteData,
   type VillageWriteRepository,
 } from './villages.repository.js';
+import { unprocessable, versionConflict, villageNotFound } from './villages.errors.js';
+import { assertCanEdit } from './villages.permissions.js';
 import { villageAudit, type VillageAuditRecorder } from './villages.audit.js';
 import type {
   CreateVillageInput,
@@ -93,52 +95,6 @@ function toNearbyPlace(row: NearbyPlaceRow, villageId: string): NearbyPlace {
     placeType: PlaceType.VILLAGE,
     village: activeVillage(row.village),
   };
-}
-
-function villageNotFound(): NotFoundError {
-  return new NotFoundError('Village not found');
-}
-
-function versionConflict(currentVersion: number): AppError {
-  return new AppError(409, 'VERSION_CONFLICT', 'The village was changed by someone else; reload it and retry', [
-    { field: 'version', message: `Current version is ${currentVersion}` },
-  ]);
-}
-
-function unprocessable(code: string, field: string, message: string): AppError {
-  return new AppError(422, code, message, [{ field, message }]);
-}
-
-// Two different 403s with their own codes, so a client can tell "this is not yours" from "propose it as a
-// change request instead". AppError rather than ForbiddenError, which always carries the code FORBIDDEN.
-function villageEditForbidden(): AppError {
-  return new AppError(403, 'VILLAGE_EDIT_FORBIDDEN', 'You can only edit villages that you created', [
-    { field: 'id', message: 'This village was created by someone else' },
-  ]);
-}
-
-function changeRequestRequired(status: VerificationStatus): AppError {
-  return new AppError(
-    403,
-    'CHANGE_REQUEST_REQUIRED',
-    `A ${status} village cannot be edited directly; submit the change as a change request`,
-    [{ field: 'verificationStatus', message: `The village is ${status}` }],
-  );
-}
-
-/**
- * Who may edit a village directly (PATCH), checked after the village is loaded:
- * - REVIEWER and ADMIN: always.
- * - EDITOR: only a village they created that is still PENDING. A VERIFIED or REJECTED village, whoever created
- *   it, has to be changed through a change request; a PENDING village of someone else is not theirs to edit.
- */
-function assertCanEdit(village: Village, actor: WriteActor): void {
-  if (actor.role === Role.REVIEWER || actor.role === Role.ADMIN) return;
-
-  if (village.verificationStatus !== VerificationStatus.PENDING) {
-    throw changeRequestRequired(village.verificationStatus);
-  }
-  if (village.createdById !== actor.userId) throw villageEditForbidden();
 }
 
 // The unique constraints are the real guard against duplicates (a pre-check would race with a
