@@ -198,7 +198,7 @@ paths:
       security: [{ bearerAuth: [] }]
       parameters:
         - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
-        - { name: limit, in: query, description: Page size, capped at 100., schema: { type: integer, minimum: 1, default: 20, maximum: 100 } }
+        - { name: limit, in: query, description: "Page size, capped at 100.", schema: { type: integer, minimum: 1, default: 20, maximum: 100 } }
         - { name: role, in: query, schema: { $ref: '#/components/schemas/Role' } }
         - { name: isActive, in: query, schema: { type: string, enum: ['true', 'false'] } }
         - { name: q, in: query, description: Case-insensitive search in email or full name (max 100 chars)., schema: { type: string, maxLength: 100 } }
@@ -386,8 +386,8 @@ components:
       type: object
       required: [accessToken, refreshToken]
       properties:
-        accessToken: { type: string, description: JWT, valid 15 minutes by default. }
-        refreshToken: { type: string, description: Opaque token, valid 7 days by default. }
+        accessToken: { type: string, description: "JWT, valid 15 minutes by default." }
+        refreshToken: { type: string, description: "Opaque token, valid 7 days by default." }
 
     AuthResult:
       allOf:
