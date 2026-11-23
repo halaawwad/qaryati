@@ -15,13 +15,15 @@ This page records how the village list search (`GET /api/v1/villages?search=`) w
 | Request mix | `search` 35 %, `search_alt_name` 15 %, `search_no_match` 10 %, `governorate` 15 %, `page` 15 %, `governorate_search` 10 % (see [`k6/village-search.js`](../k6/village-search.js)) |
 | Data | 20,014 villages (20,000 synthetic `perf-` villages from `npm run perf:data -- --count=20000 --seed=1`, plus the 14 real ones) and 26,068 alternate names. The same seed produces the same rows, so every measurement used identical data |
 | Rate limiting | `RATE_LIMIT_ENABLED=false`, set in the local `.env` for the runs only and restored afterwards. Never disabled anywhere else |
-| Quiet-machine gate | Before each warm-up the machine is sampled for 30 s. The run only starts if average CPU is below 20 % and free RAM is at least 650 MB; otherwise it waits a minute and checks again, for up to 10 minutes, then gives up without measuring |
+| Quiet-machine gate ([`measure.sh`](../k6/tools/measure.sh)) | Before each warm-up the machine is sampled for 30 s. The run only starts if average CPU is below 20 % and free RAM is at least 650 MB; otherwise it waits a minute and checks again, for up to 10 minutes, then gives up without measuring |
 
 The RAM threshold was first 800 MB. With Docker running, this machine settles around 700 MB free (ten checks over ten minutes peaked at 794 MB), so the gate stopped the session twice without measuring. It was lowered to 650 MB, and the actual values of every run are recorded below.
 
 The synthetic data is created by a script that is not part of `prisma/seed.ts` and only ever touches rows whose slug starts with `perf-`. `npm run perf:clean` removes exactly those rows (and, since the write scenario was added, their audit rows).
 
 ## Methodology
+
+The procedure is scripted in [`k6/tools/`](../k6/tools/README.md) ([`measure.sh`](../k6/tools/measure.sh), [`search-totals.mjs`](../k6/tools/search-totals.mjs), [`explain.py`](../k6/tools/explain.py)), where the README explains how to run it.
 
 The three measurements were taken **in the same session, one after the other**, with the same procedure each time:
 
@@ -39,7 +41,7 @@ What changed between the measurements:
 | 2. After the indexes | Same image as 1 | Four `pg_trgm` GIN indexes (`villages.name_ar`, `name_en`, `slug`, `village_names.name`) from the migration |
 | 3. After the UNION | `bfebc3a`: `UNION` in a tagged `$queryRaw` | Same indexes, created by the migration when the new app started |
 
-**The totals check.** Before every run, 38 fixed list queries are sent and, for each, `meta.total` and a hash of the ids on pages 1 and 2 are recorded. The queries cover every search term of the load test, governorate and verification filters, three sort orders, and the `%`, `_`, `bei_`, `100%` and `a\b` cases. The files are compared line by line against the first baseline: **all 38 lines are identical in all three measurements**. So the faster queries return exactly the same villages in exactly the same order. The script that produces these files was kept local; the output is committed.
+**The totals check.** Before every run, 38 fixed list queries are sent and, for each, `meta.total` and a hash of the ids on pages 1 and 2 are recorded. The queries cover every search term of the load test, governorate and verification filters, three sort orders, and the `%`, `_`, `bei_`, `100%` and `a\b` cases. The files are compared line by line against the first baseline: **all 38 lines are identical in all three measurements**. So the faster queries return exactly the same villages in exactly the same order. The script is [`k6/tools/search-totals.mjs`](../k6/tools/search-totals.mjs); its output is committed with each measurement.
 
 ## Results
 
@@ -81,7 +83,7 @@ name_ar ILIKE $1 OR name_en ILIKE $1 OR slug ILIKE $1
 OR id IN (SELECT village_id FROM village_names WHERE ... name ILIKE $1)
 ```
 
-The `IN (subquery)` branch cannot use an index, and one branch of an `OR` that cannot use an index stops Postgres from combining the others, so it falls back to scanning every row. It is not `lower()` or the insensitive mode: `ILIKE` matches `gin_trgm_ops` fine. Three hand-written queries for the term `الزيتون` (at the end of the EXPLAIN file) show it:
+The `IN (subquery)` branch cannot use an index, and one branch of an `OR` that cannot use an index stops Postgres from combining the others, so it falls back to scanning every row. It is not `lower()` or the insensitive mode: `ILIKE` matches `gin_trgm_ops` fine. Three hand-written queries for the term `الزيتون` (at the end of the EXPLAIN file; the same queries are in [`k6/tools/explain-or-vs-union.sql`](../k6/tools/explain-or-vs-union.sql)) show it:
 
 | Query | Plan | Time |
 |---|---|---|
