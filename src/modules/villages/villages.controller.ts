@@ -11,7 +11,7 @@ import type {
 import { villageService, type WriteActor } from './villages.service.js';
 
 function actorOf(req: Request): WriteActor {
-  return { userId: req.user.id, requestId: req.requestId };
+  return { userId: req.user.id, role: req.user.role, requestId: req.requestId };
 }
 
 export const list: RequestHandler = async (req, res, next) => {
