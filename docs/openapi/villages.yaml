@@ -78,8 +78,8 @@ paths:
 
         - **Search:** `search` is a case-insensitive "contains" match on the Arabic name, the English name,
           the slug and the alternate names (`village_names`). It is trimmed, at most 100 characters, and blank
-          text is ignored. `%` and `_` are not escaped, so they act as wildcards (and a backslash is the escape
-          character); this is the current behaviour of the endpoint.
+          text is ignored. The term is matched literally: `\`, `%` and `_` in it are escaped, so `search=%` finds
+          names that contain a percent sign (not every village) and `bei_` does not match `beit`.
         - **Filters** combine with AND. A filter value that matches nothing returns an empty page, not an error.
         - **Sort:** by `sort` and `order` (default `nameAr` ascending). The village id ascending is always
           added as a tie-breaker, so pages are stable. A missing value in `nameEn`, `elevationM` or
