@@ -137,7 +137,12 @@ sequenceDiagram
     E-->>C: { "error": { code, message, details, requestId } }
 ```
 
-On write routes the order is `authenticate` → `requireRole(...)` → `validate(...)` → controller, so an anonymous or unauthorised request gets `401` / `403` before its body is checked. The `users` router applies `authenticate` and `requireRole('ADMIN')` once, to all its routes. Auth routes have no `authenticate`; `register`, `login` and `refresh` put their own rate limiter before `validate`.
+This order applies to the **protected write routes** (content writes and the `users` routes): `authenticate` → `requireRole(...)` → `validate(...)` → controller, so an anonymous or unauthorised request gets `401` / `403` before its body is checked. The `users` router applies `authenticate` and `requireRole('ADMIN')` once, to all its routes.
+
+The auth routes are different:
+- `POST /auth/register`, `/auth/login` and `/auth/refresh`: their own rate limiter → `validate` → controller (no `authenticate`).
+- `POST /auth/logout`: `validate` → controller (no `authenticate`; the refresh token in the body identifies the session).
+- `GET /auth/me`: `authenticate` → controller (no role check, no body).
 
 Which routes need a token:
 - **Public:** all content reads (villages, governorates, sources, events, landmarks, heritage, economy, facilities), `/health`, and `POST /auth/register`, `/auth/login`, `/auth/refresh`, `/auth/logout`.
@@ -158,7 +163,7 @@ Audit: content writes (sources, landmarks, economy, facilities) and user role / 
 | Request ID | `X-Request-Id` header on every response; also in logs and audit rows |
 | Health | `GET /api/v1/health` returns `200` or `503` with `db` and `redis` status |
 | Roles | Visitor reads; `EDITOR` adds (as `PENDING`); `REVIEWER` verifies or rejects; `ADMIN` also deletes and manages users. The full matrix is in the team guide |
-| Conflicts | Updates send the `version` they read; a stale version returns `409 CONFLICT` |
+| Conflicts | Endpoints that implement optimistic locking require the `version` the client read and return `409 CONFLICT` when it is stale. On `main` these are the sources update / delete (`expectedVersion`) and the village update / verify / reject (`version`). The column alone does not prevent overwrites |
 
 ### Merged vs planned workflows
 

@@ -266,7 +266,7 @@ Shared columns on content tables:
 | Column | Purpose |
 |---|---|
 | `verification_status` | `PENDING`, `VERIFIED` or `REJECTED`; new content starts as `PENDING` |
-| `version` | Optimistic locking: an update must send the version it read, otherwise `409 Conflict` |
+| `version` | Starts at 1; the write endpoints that use it increment it on every change. The column alone does not prevent lost updates: optimistic locking works only where the endpoint compares the client's version before writing and returns `409 Conflict` when it is stale (on `main`: sources update / delete, village update / verify / reject) |
 | `deleted_at` | Soft delete; rows are hidden, not removed |
 | `created_by_id`, `updated_by_id` | References to `users` (lines omitted above to keep the diagram readable) |
 | `source_id` | Reference to `sources` for provenance |
