@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  createNearbyPlaceBodySchema,
   createVillageBodySchema,
+  createVillageNameBodySchema,
   listVillagesQuerySchema,
   nearbyVillagesQuerySchema,
   updateVillageBodySchema,
+  updateVillageNameBodySchema,
 } from '../src/modules/villages/villages.schemas.js';
 import { parsePagination } from '../src/shared/pagination.js';
 
@@ -86,5 +89,60 @@ describe('village write schemas', () => {
     expect(updateVillageBodySchema.safeParse({ version: 1 }).success).toBe(false);
     expect(updateVillageBodySchema.safeParse({ version: 1, verificationStatus: 'VERIFIED' }).success).toBe(false);
     expect(updateVillageBodySchema.parse({ version: 1, nameEn: 'X' })).toEqual({ version: 1, nameEn: 'X' });
+  });
+});
+
+describe('village name schemas', () => {
+  const valid = { name: 'Bayta', language: 'en', nameType: 'TRANSLITERATION' };
+
+  it('accepts ar and en only', () => {
+    expect(createVillageNameBodySchema.safeParse(valid).success).toBe(true);
+    expect(createVillageNameBodySchema.safeParse({ ...valid, language: 'ar' }).success).toBe(true);
+    expect(createVillageNameBodySchema.safeParse({ ...valid, language: 'fr' }).success).toBe(false);
+  });
+
+  it('rejects periodFrom after periodTo, and accepts open-ended periods', () => {
+    expect(createVillageNameBodySchema.safeParse({ ...valid, periodFrom: 1950, periodTo: 1900 }).success).toBe(false);
+    expect(createVillageNameBodySchema.safeParse({ ...valid, periodFrom: 1900, periodTo: 1900 }).success).toBe(true);
+    expect(createVillageNameBodySchema.safeParse({ ...valid, periodFrom: 1900 }).success).toBe(true);
+  });
+
+  it.each(['id', 'villageId', 'verificationStatus', 'createdById', 'deletedAt', 'version'])(
+    'rejects server-owned field %s on create',
+    (field) => {
+      expect(createVillageNameBodySchema.safeParse({ ...valid, [field]: 'x' }).success).toBe(false);
+    },
+  );
+
+  it('requires version and at least one change on update', () => {
+    expect(updateVillageNameBodySchema.safeParse({ name: 'X' }).success).toBe(false);
+    expect(updateVillageNameBodySchema.safeParse({ version: 1 }).success).toBe(false);
+    expect(updateVillageNameBodySchema.safeParse({ version: 1, periodTo: 1900 }).success).toBe(true);
+  });
+});
+
+describe('nearby place schema', () => {
+  const villageId = '22222222-2222-4222-8222-222222222222';
+
+  it('accepts a related village or an external place', () => {
+    expect(createNearbyPlaceBodySchema.safeParse({ relatedVillageId: villageId, relation: 'ADJACENT' }).success).toBe(true);
+    expect(
+      createNearbyPlaceBodySchema.safeParse({ placeName: 'نابلس', placeType: 'CITY', relation: 'NEARBY', distanceKm: 12.5 }).success,
+    ).toBe(true);
+  });
+
+  it('rejects a body that mixes both shapes or misses fields', () => {
+    expect(
+      createNearbyPlaceBodySchema.safeParse({ relatedVillageId: villageId, placeName: 'x', placeType: 'CITY', relation: 'NEARBY' })
+        .success,
+    ).toBe(false);
+    expect(createNearbyPlaceBodySchema.safeParse({ placeName: 'x', relation: 'NEARBY' }).success).toBe(false);
+    expect(createNearbyPlaceBodySchema.safeParse({ relatedVillageId: 'beita', relation: 'NEARBY' }).success).toBe(false);
+  });
+
+  it.each([0, -1])('rejects distanceKm=%s', (distanceKm) => {
+    expect(createNearbyPlaceBodySchema.safeParse({ relatedVillageId: villageId, relation: 'NEARBY', distanceKm }).success).toBe(
+      false,
+    );
   });
 });
