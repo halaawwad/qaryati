@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import { authRouter } from './modules/auth/auth.routes.js';
+import { economyRouter, villageEconomyRouter } from './modules/economy/economy.routes.js';
 import { eventsRouter, villageEventsRouter } from './modules/events/events.routes.js';
+import { facilitiesRouter, villageFacilitiesRouter } from './modules/facilities/facilities.routes.js';
 import { governoratesRouter } from './modules/governorates/governorates.routes.js';
 import { heritageRouter, villageHeritageRouter } from './modules/heritage/heritage.routes.js';
 import { landmarksRouter, villageLandmarksRouter } from './modules/landmarks/landmarks.routes.js';
@@ -54,4 +56,11 @@ router.use('/events', eventsRouter);
 router.use('/villages/:villageId/events', villageEventsRouter);
 router.use('/landmarks', landmarksRouter);
 router.use('/villages/:villageId/landmarks', villageLandmarksRouter);
+
+router.use('/facilities', facilitiesRouter);
+router.use('/villages/:villageId/facilities', villageFacilitiesRouter);
+
+router.use('/economy', economyRouter);
+router.use('/villages/:villageId/economy', villageEconomyRouter);
+
 router.use('/villages', villagesRouter);
