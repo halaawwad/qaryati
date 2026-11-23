@@ -1,6 +1,6 @@
 import { AuditAction, Prisma, VerificationStatus, type Village } from '@prisma/client';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AuditEntry, AuditRecorder } from '../src/modules/audit/audit.service.js';
+import type { VillageAuditEntry, VillageAuditRecorder } from '../src/modules/villages/villages.audit.js';
 import type {
   VillageChanges,
   VillageCreateData,
@@ -167,11 +167,11 @@ class FakeVillageStore implements VillageRepository, VillageWriteRepository {
   }
 }
 
-class FakeAudit implements AuditRecorder {
-  entries: AuditEntry[] = [];
+class FakeAudit implements VillageAuditRecorder {
+  entries: VillageAuditEntry[] = [];
   transactions: Prisma.TransactionClient[] = [];
 
-  async record(tx: Prisma.TransactionClient, entry: AuditEntry): Promise<void> {
+  async record(tx: Prisma.TransactionClient, entry: VillageAuditEntry): Promise<void> {
     this.transactions.push(tx);
     this.entries.push(entry);
   }

@@ -1,4 +1,4 @@
-import { PlaceRelation, PlaceType, VerificationStatus, VillageNameType } from '@prisma/client';
+import { PlaceRelation, PlaceType, VerificationStatus, VillageNameType, type Prisma } from '@prisma/client';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   NearbyPlaceRow,
@@ -29,6 +29,7 @@ class FakeVillageRepository implements VillageRepository {
   villages: StoredVillage[] = [];
   lastLookup: VillageLookup | undefined;
   existsCalls = 0;
+  lastExistsClient: unknown;
   nearbyRows: NearbyPlaceRow[] = [];
   withinRadius: VillageWithinRadius[] = [];
   lastRadiusSearch: RadiusSearch | undefined;
@@ -54,8 +55,9 @@ class FakeVillageRepository implements VillageRepository {
     return details;
   }
 
-  async exists(id: string): Promise<boolean> {
+  async exists(id: string, client?: Prisma.TransactionClient): Promise<boolean> {
     this.existsCalls += 1;
+    this.lastExistsClient = client;
     return this.villages.some((stored) => stored.id === id && !stored.deletedAt);
   }
 
@@ -253,6 +255,15 @@ describe('VillageService details', () => {
 
   it('ensureExists resolves for an active village', async () => {
     await expect(new Service(repo).ensureExists(villageId)).resolves.toBeUndefined();
+  });
+
+  it('ensureExists passes the transaction client to the repository', async () => {
+    const tx = {} as Prisma.TransactionClient;
+
+    await new Service(repo).ensureExists(villageId, tx);
+    expect(repo.lastExistsClient).toBe(tx);
+
+    await expect(new Service(repo).ensureExists(missingVillageId, tx)).rejects.toBeInstanceOf(NotFoundError);
   });
 
   it('ensureExists throws NotFoundError for missing, deleted or malformed ids', async () => {
