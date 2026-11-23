@@ -1,0 +1,30 @@
+k6 village search: before
+  target:   http://app:3000/api/v1/villages
+  load:     20 VUs, 60s (constant-vus)
+  dataset:  20014 villages, 26068 village_names, trgm indexes: 0; 20000 perf- seed=1 + 14 real; code=perf/k6-village-search@03c0718 (main@14b819f merged), no trigram indexes
+
+overall
+  requests:    1261
+  throughput:  20.68 req/s
+  avg:         959.5 ms
+  p95:         1505.2 ms
+  p99:         1782.4 ms
+  max:         2131.1 ms
+  error rate:  0.00 %
+  checks ok:   100.00 %
+
+per request kind
+  kind                 requests         avg         p95         max    errors
+  search                   412   1163.5 ms   1586.4 ms   2131.1 ms    0.00 %
+  search_alt_name          219   1168.3 ms   1568.9 ms   1860.4 ms    0.00 %
+  search_no_match          118   1185.9 ms   1634.1 ms   2035.6 ms    0.00 %
+  governorate              184    546.2 ms    817.4 ms    970.3 ms    0.00 %
+  page                     185    679.5 ms    938.4 ms   1198.7 ms    0.00 %
+  governorate_search       143    759.3 ms   1082.9 ms   1324.2 ms    0.00 %
+conditions at the start of the run (same procedure for all three measurements):
+  free RAM: 909 MB of 6090 MB
+  cpu load: 7 %
+  chrome processes: 0
+  ChatGPT processes (windowless, background): 12
+  edge processes (windowless, background): 7
+  procedure: app recreated, ANALYZE, totals check, 15s warm-up (discarded), then 60s measured
