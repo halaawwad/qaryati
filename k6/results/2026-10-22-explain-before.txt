@@ -1,0 +1,195 @@
+EXPLAIN (ANALYZE, BUFFERS) - village search, BEFORE trigram indexes
+Date: 2026-10-22   Code: main@7433687   Data: 20014 villages (20000 perf- seed=1), 26068 village_names
+
+How the SQL was obtained: Postgres log_statement was set to 'all' temporarily (ALTER SYSTEM + pg_reload_conf,
+reset right after), one real request was sent to GET /api/v1/villages?search=..., and the COUNT and page queries
+Prisma executed were copied from the log. Below they are run with the bound parameters inlined
+('%term%', LIMIT 20, OFFSET 0). Each search request runs both queries, one after the other.
+Pager usage is off.
+=== environment ===
+                                         version                                          
+------------------------------------------------------------------------------------------
+ PostgreSQL 16.15 on x86_64-pc-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit
+(1 row)
+
+ datname | datcollate |  datctype  | datlocprovider 
+---------+------------+------------+----------------
+ qaryati | en_US.utf8 | en_US.utf8 | c
+(1 row)
+
+ villages | village_names 
+----------+---------------
+    20014 |         26068
+(1 row)
+
+             indexname              |                                                indexdef                                                
+------------------------------------+--------------------------------------------------------------------------------------------------------
+ village_names_created_by_id_idx    | CREATE INDEX village_names_created_by_id_idx ON public.village_names USING btree (created_by_id)
+ village_names_pkey                 | CREATE UNIQUE INDEX village_names_pkey ON public.village_names USING btree (id)
+ village_names_source_id_idx        | CREATE INDEX village_names_source_id_idx ON public.village_names USING btree (source_id)
+ village_names_updated_by_id_idx    | CREATE INDEX village_names_updated_by_id_idx ON public.village_names USING btree (updated_by_id)
+ village_names_village_id_idx       | CREATE INDEX village_names_village_id_idx ON public.village_names USING btree (village_id)
+ villages_created_by_id_idx         | CREATE INDEX villages_created_by_id_idx ON public.villages USING btree (created_by_id)
+ villages_governorate_id_idx        | CREATE INDEX villages_governorate_id_idx ON public.villages USING btree (governorate_id)
+ villages_local_authority_id_idx    | CREATE INDEX villages_local_authority_id_idx ON public.villages USING btree (local_authority_id)
+ villages_name_origin_source_id_idx | CREATE INDEX villages_name_origin_source_id_idx ON public.villages USING btree (name_origin_source_id)
+ villages_pcbs_code_key             | CREATE UNIQUE INDEX villages_pcbs_code_key ON public.villages USING btree (pcbs_code)
+ villages_pkey                      | CREATE UNIQUE INDEX villages_pkey ON public.villages USING btree (id)
+ villages_slug_key                  | CREATE UNIQUE INDEX villages_slug_key ON public.villages USING btree (slug)
+ villages_updated_by_id_idx         | CREATE INDEX villages_updated_by_id_idx ON public.villages USING btree (updated_by_id)
+(13 rows)
+
+
+=== Arabic search (term: الزيتون) - COUNT query ===
+                                                                              QUERY PLAN                                                                               
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=167322.05..167322.06 rows=1 width=8) (actual time=272.547..272.551 rows=1 loops=1)
+   Buffers: shared hit=924
+   ->  Seq Scan on villages  (cost=0.00..167189.58 rows=10597 width=16) (actual time=147.502..272.054 rows=1362 loops=1)
+         Filter: ((deleted_at IS NULL) AND ((name_ar ~~* '%الزيتون%'::text) OR (name_en ~~* '%الزيتون%'::text) OR (slug ~~* '%الزيتون%'::text) OR (hashed SubPlan 2)))
+         Rows Removed by Filter: 18652
+         Buffers: shared hit=924
+         SubPlan 2
+           ->  Seq Scan on village_names t0  (cost=0.00..726.85 rows=191 width=16) (actual time=0.418..64.486 rows=327 loops=1)
+                 Filter: ((deleted_at IS NULL) AND (village_id IS NOT NULL) AND (name ~~* '%الزيتون%'::text))
+                 Rows Removed by Filter: 25741
+                 Buffers: shared hit=401
+ Planning:
+   Buffers: shared hit=20
+ Planning Time: 4.090 ms
+ JIT:
+   Functions: 18
+   Options: Inlining false, Optimization false, Expressions true, Deforming true
+   Timing: Generation 5.439 ms, Inlining 0.000 ms, Optimization 6.229 ms, Emission 75.738 ms, Total 87.406 ms
+ Execution Time: 459.710 ms
+(19 rows)
+
+
+=== Arabic search (term: الزيتون) - page query (LIMIT 20) ===
+                                                                                 QUERY PLAN                                                                                  
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=167524.55..167524.60 rows=20 width=162) (actual time=161.463..161.472 rows=20 loops=1)
+   Buffers: shared hit=933
+   ->  Sort  (cost=167524.55..167551.04 rows=10597 width=162) (actual time=128.435..128.439 rows=20 loops=1)
+         Sort Key: villages.name_ar, villages.id
+         Sort Method: top-N heapsort  Memory: 31kB
+         Buffers: shared hit=933
+         ->  Seq Scan on villages  (cost=0.00..167242.57 rows=10597 width=162) (actual time=40.180..126.717 rows=1362 loops=1)
+               Filter: ((deleted_at IS NULL) AND ((name_ar ~~* '%الزيتون%'::text) OR (name_en ~~* '%الزيتون%'::text) OR (slug ~~* '%الزيتون%'::text) OR (hashed SubPlan 2)))
+               Rows Removed by Filter: 18652
+               Buffers: shared hit=927
+               SubPlan 2
+                 ->  Seq Scan on village_names t0  (cost=0.00..726.85 rows=191 width=16) (actual time=0.426..38.927 rows=327 loops=1)
+                       Filter: ((deleted_at IS NULL) AND (village_id IS NOT NULL) AND (name ~~* '%الزيتون%'::text))
+                       Rows Removed by Filter: 25741
+                       Buffers: shared hit=401
+ Planning:
+   Buffers: shared hit=32
+ Planning Time: 4.386 ms
+ JIT:
+   Functions: 19
+   Options: Inlining false, Optimization false, Expressions true, Deforming true
+   Timing: Generation 18.040 ms, Inlining 0.000 ms, Optimization 1.374 ms, Emission 32.005 ms, Total 51.420 ms
+ Execution Time: 181.989 ms
+(23 rows)
+
+
+=== English search (term: Deir) - COUNT query ===
+                                                                          QUERY PLAN                                                                          
+--------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=167326.75..167326.76 rows=1 width=8) (actual time=139.138..139.142 rows=1 loops=1)
+   Buffers: shared hit=924
+   ->  Seq Scan on villages  (cost=0.00..167189.58 rows=10973 width=16) (actual time=70.269..138.794 rows=1950 loops=1)
+         Filter: ((deleted_at IS NULL) AND ((name_ar ~~* '%Deir%'::text) OR (name_en ~~* '%Deir%'::text) OR (slug ~~* '%Deir%'::text) OR (hashed SubPlan 2)))
+         Rows Removed by Filter: 18064
+         Buffers: shared hit=924
+         SubPlan 2
+           ->  Seq Scan on village_names t0  (cost=0.00..726.85 rows=2 width=16) (actual time=36.336..36.337 rows=0 loops=1)
+                 Filter: ((deleted_at IS NULL) AND (village_id IS NOT NULL) AND (name ~~* '%Deir%'::text))
+                 Rows Removed by Filter: 26068
+                 Buffers: shared hit=401
+ Planning Time: 4.515 ms
+ JIT:
+   Functions: 18
+   Options: Inlining false, Optimization false, Expressions true, Deforming true
+   Timing: Generation 3.944 ms, Inlining 0.000 ms, Optimization 1.621 ms, Emission 32.027 ms, Total 37.592 ms
+ Execution Time: 143.180 ms
+(17 rows)
+
+
+=== English search (term: Deir) - page query (LIMIT 20) ===
+                                                                             QUERY PLAN                                                                             
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=167536.44..167536.49 rows=20 width=162) (actual time=172.627..172.639 rows=20 loops=1)
+   Buffers: shared hit=924
+   ->  Sort  (cost=167536.44..167563.87 rows=10973 width=162) (actual time=124.634..124.640 rows=20 loops=1)
+         Sort Key: villages.name_ar, villages.id
+         Sort Method: top-N heapsort  Memory: 31kB
+         Buffers: shared hit=924
+         ->  Seq Scan on villages  (cost=0.00..167244.45 rows=10973 width=162) (actual time=40.689..122.432 rows=1950 loops=1)
+               Filter: ((deleted_at IS NULL) AND ((name_ar ~~* '%Deir%'::text) OR (name_en ~~* '%Deir%'::text) OR (slug ~~* '%Deir%'::text) OR (hashed SubPlan 2)))
+               Rows Removed by Filter: 18064
+               Buffers: shared hit=924
+               SubPlan 2
+                 ->  Seq Scan on village_names t0  (cost=0.00..726.85 rows=2 width=16) (actual time=40.147..40.148 rows=0 loops=1)
+                       Filter: ((deleted_at IS NULL) AND (village_id IS NOT NULL) AND (name ~~* '%Deir%'::text))
+                       Rows Removed by Filter: 26068
+                       Buffers: shared hit=401
+ Planning Time: 1.345 ms
+ JIT:
+   Functions: 19
+   Options: Inlining false, Optimization false, Expressions true, Deforming true
+   Timing: Generation 3.928 ms, Inlining 0.000 ms, Optimization 1.359 ms, Emission 46.964 ms, Total 52.251 ms
+ Execution Time: 177.111 ms
+(21 rows)
+
+
+=== no-match search (term: zzqnomatch) - COUNT query ===
+                                                                                   QUERY PLAN                                                                                   
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=167314.71..167314.72 rows=1 width=8) (actual time=191.495..191.499 rows=1 loops=1)
+   Buffers: shared hit=924
+   ->  Seq Scan on villages  (cost=0.00..167189.58 rows=10010 width=16) (actual time=191.335..191.336 rows=0 loops=1)
+         Filter: ((deleted_at IS NULL) AND ((name_ar ~~* '%zzqnomatch%'::text) OR (name_en ~~* '%zzqnomatch%'::text) OR (slug ~~* '%zzqnomatch%'::text) OR (hashed SubPlan 2)))
+         Rows Removed by Filter: 20014
+         Buffers: shared hit=924
+         SubPlan 2
+           ->  Seq Scan on village_names t0  (cost=0.00..726.85 rows=2 width=16) (actual time=41.389..41.390 rows=0 loops=1)
+                 Filter: ((deleted_at IS NULL) AND (village_id IS NOT NULL) AND (name ~~* '%zzqnomatch%'::text))
+                 Rows Removed by Filter: 26068
+                 Buffers: shared hit=401
+ Planning Time: 2.563 ms
+ JIT:
+   Functions: 18
+   Options: Inlining false, Optimization false, Expressions true, Deforming true
+   Timing: Generation 6.441 ms, Inlining 0.000 ms, Optimization 1.848 ms, Emission 38.438 ms, Total 46.727 ms
+ Execution Time: 198.517 ms
+(17 rows)
+
+
+=== no-match search (term: zzqnomatch) - page query (LIMIT 20) ===
+                                                                                      QUERY PLAN                                                                                      
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=167506.00..167506.05 rows=20 width=162) (actual time=181.456..181.460 rows=0 loops=1)
+   Buffers: shared hit=924
+   ->  Sort  (cost=167506.00..167531.02 rows=10010 width=162) (actual time=133.177..133.180 rows=0 loops=1)
+         Sort Key: villages.name_ar, villages.id
+         Sort Method: quicksort  Memory: 25kB
+         Buffers: shared hit=924
+         ->  Seq Scan on villages  (cost=0.00..167239.63 rows=10010 width=162) (actual time=133.124..133.126 rows=0 loops=1)
+               Filter: ((deleted_at IS NULL) AND ((name_ar ~~* '%zzqnomatch%'::text) OR (name_en ~~* '%zzqnomatch%'::text) OR (slug ~~* '%zzqnomatch%'::text) OR (hashed SubPlan 2)))
+               Rows Removed by Filter: 20014
+               Buffers: shared hit=924
+               SubPlan 2
+                 ->  Seq Scan on village_names t0  (cost=0.00..726.85 rows=2 width=16) (actual time=53.538..53.539 rows=0 loops=1)
+                       Filter: ((deleted_at IS NULL) AND (village_id IS NOT NULL) AND (name ~~* '%zzqnomatch%'::text))
+                       Rows Removed by Filter: 26068
+                       Buffers: shared hit=401
+ Planning Time: 4.311 ms
+ JIT:
+   Functions: 19
+   Options: Inlining false, Optimization false, Expressions true, Deforming true
+   Timing: Generation 5.688 ms, Inlining 0.000 ms, Optimization 2.014 ms, Emission 46.620 ms, Total 54.321 ms
+ Execution Time: 187.134 ms
+(21 rows)
+

@@ -44,6 +44,9 @@ const envSchema = z.object({
 
 export type Env = z.infer<typeof envSchema>;
 
+/** The placeholder in .env.example. It is long enough to pass the length check, but it is public. */
+export const EXAMPLE_JWT_ACCESS_SECRET = 'replace_with_at_least_32_characters_secret';
+
 function loadEnv(): Env {
   const result = envSchema.safeParse(process.env);
 
@@ -53,6 +56,20 @@ function loadEnv(): Env {
       .join('\n');
     console.error(`Invalid environment configuration:\n${problems}`);
     process.exit(1);
+  }
+
+  if (result.data.JWT_ACCESS_SECRET === EXAMPLE_JWT_ACCESS_SECRET) {
+    const message =
+      'JWT_ACCESS_SECRET still has the .env.example placeholder, so anyone can sign tokens. Generate one with: ' +
+      `node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"`;
+
+    if (result.data.NODE_ENV === 'production') {
+      console.error(`Invalid environment configuration:\n  - JWT_ACCESS_SECRET: ${message}`);
+      process.exit(1);
+    }
+
+    // Local setups keep working, but are told to replace it.
+    console.warn(`Warning: ${message}`);
   }
 
   return result.data;

@@ -1,0 +1,23 @@
+k6 village search: before (no search indexes)
+  target:   http://app:3000/api/v1/villages
+  load:     20 VUs, 60s (constant-vus)
+  dataset:  villages=20014 (20000 perf- seed=1, 14 real), village_names=26068, code=main@7433687, no extra indexes
+
+overall
+  requests:    952
+  throughput:  15.51 req/s
+  avg:         1275.1 ms
+  p95:         2117.3 ms
+  p99:         2574.6 ms
+  max:         2880.7 ms
+  error rate:  0.00 %
+  checks ok:   100.00 %
+
+per request kind
+  kind                 requests         avg         p95         max    errors
+  search                   334   1521.3 ms   2368.5 ms   2877.4 ms    0.00 %
+  search_alt_name          144   1577.9 ms   2340.9 ms   2880.7 ms    0.00 %
+  search_no_match          101   1497.2 ms   2265.0 ms   2756.6 ms    0.00 %
+  governorate              143    733.0 ms   1164.5 ms   1668.2 ms    0.00 %
+  page                     140    960.3 ms   1634.4 ms   1833.3 ms    0.00 %
+  governorate_search        90    978.3 ms   1425.7 ms   1683.4 ms    0.00 %
