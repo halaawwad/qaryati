@@ -86,7 +86,7 @@ villagesRouter.patch(
 villagesRouter.delete(
   '/:id/names/:nameId',
   authenticate,
-  requireRole(...REVIEWERS),
+  requireRole(Role.ADMIN),
   validate({ params: villageNameParamsSchema }),
   relations.removeName,
 );
@@ -101,7 +101,7 @@ villagesRouter.post(
 villagesRouter.delete(
   '/:id/nearby/:relationId',
   authenticate,
-  requireRole(...REVIEWERS),
+  requireRole(Role.ADMIN),
   validate({ params: nearbyRelationParamsSchema }),
   relations.removeNearby,
 );
