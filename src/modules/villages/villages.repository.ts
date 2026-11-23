@@ -102,7 +102,7 @@ export interface VillageRepository {
   findMany(params: VillageListParams): Promise<{ items: VillageListItem[]; total: number }>;
   /** Returns null when the village does not exist or is soft-deleted. */
   findDetails(lookup: VillageLookup): Promise<VillageDetails | null>;
-  
+
   /** True only for an active village; a supplied transaction holds a shared row lock. */
   exists(id: string, client?: Prisma.TransactionClient): Promise<boolean>;
 

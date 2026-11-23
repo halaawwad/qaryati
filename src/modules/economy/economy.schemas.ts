@@ -33,6 +33,16 @@ export const listEconomyQuerySchema = z.object({
   { path: ['page'], message: `Pagination offset must not exceed ${MAX_ECONOMY_OFFSET}` },
 );
 
+export const createEconomySchema = z.strictObject({
+  name: z.string().trim().min(1).max(200),
+  category: z.enum(EconomicCategory),
+  sourceId: z.uuid(),
+  description: z.string().trim().max(5000).optional(),
+  isMajor: z.boolean().default(false),
+  asOfYear: z.number().int().min(-2147483648).max(2147483647).nullable().optional(),
+});
+
+export type CreateEconomyInput = z.infer<typeof createEconomySchema>;
 export type VillageEconomyParams = z.infer<typeof villageEconomyParamsSchema>;
 export type EconomyParams = z.infer<typeof economyParamsSchema>;
 export type ListEconomyQuery = z.infer<typeof listEconomyQuerySchema>;

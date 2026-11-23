@@ -1,6 +1,11 @@
 import type { EconomicCategory, EconomicActivity, Prisma, VerificationStatus } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
-import type { EconomySortField, SortOrder } from './economy.schemas.js';
+import type { CreateEconomyInput, EconomySortField, SortOrder } from './economy.schemas.js';
+
+export interface EconomyCreateContext {
+  actorId: string;
+  requestId: string;
+}
 
 export type EconomyDetails = Pick<
   EconomicActivity,
@@ -23,6 +28,8 @@ export interface EconomyListParams {
 }
 
 export interface EconomyRepository {
+  transaction<T>(fn: (client: Prisma.TransactionClient) => Promise<T>): Promise<T>;
+  create(villageId: string, input: CreateEconomyInput, context: EconomyCreateContext, client: Prisma.TransactionClient): Promise<EconomyDetails>;
   /** Null means the parent is missing/deleted; an empty list means no matching items. */
   findMany(params: EconomyListParams): Promise<{ items: EconomyDetails[]; total: number } | null>;
   /** Only active items belonging to active villages are visible. */
@@ -79,6 +86,22 @@ function buildOrderBy({ field, order }: EconomyListParams['sort']): Prisma.Econo
 }
 
 export const economyRepository: EconomyRepository = {
+  transaction(fn) {
+    return prisma.$transaction(fn);
+  },
+
+  create(villageId, input, context, client) {
+    return client.economicActivity.create({
+      data: {
+        villageId, name: input.name, category: input.category, sourceId: input.sourceId,
+        description: input.description, isMajor: input.isMajor, asOfYear: input.asOfYear,
+        createdById: context.actorId, updatedById: context.actorId,
+        // Prisma supplies PENDING and version 1, along with ID and timestamps.
+      },
+      select: economySelect,
+    });
+  },
+
   async findMany(params) {
     return prisma.$transaction(async (tx) => {
       const village = await tx.village.findFirst({
