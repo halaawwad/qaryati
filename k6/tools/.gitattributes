@@ -1,2 +1,3 @@
-# Keep the shell scripts LF on Windows checkouts, so they run under bash.
-*.sh text eol=lf
+# Keep the shell scripts in this folder LF on Windows checkouts, so they run under bash.
+# Only k6/tools/*.sh: the pattern is anchored to this directory and applies nowhere else.
+/*.sh text eol=lf

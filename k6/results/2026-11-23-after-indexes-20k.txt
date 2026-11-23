@@ -24,7 +24,5 @@ per request kind
 conditions (same procedure and the same quiet-machine gate for all three measurements):
   in the 30 s before the warm-up: average CPU 3 %, lowest free RAM 772 MB
   chrome processes: 0
-  ChatGPT processes (windowless, background): 0
-  edge processes (windowless, background): 0
-  3uAirPlayer processes: 1
+  background desktop processes with no open windows: 1
   procedure: app recreated, ANALYZE, totals check, quiet-machine gate, 15s warm-up (discarded), then 60s measured

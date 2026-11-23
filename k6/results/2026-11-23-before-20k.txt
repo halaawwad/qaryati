@@ -25,6 +25,5 @@ conditions at the start of the run (same procedure for all three measurements):
   free RAM: 909 MB of 6090 MB
   cpu load: 7 %
   chrome processes: 0
-  ChatGPT processes (windowless, background): 12
-  edge processes (windowless, background): 7
+  background desktop processes with no open windows: 19
   procedure: app recreated, ANALYZE, totals check, 15s warm-up (discarded), then 60s measured
