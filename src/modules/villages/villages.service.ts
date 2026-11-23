@@ -34,9 +34,11 @@ import {
   type VillageVersionInput,
 } from './villages.schemas.js';
 
-/** Who is making a change, for createdById/updatedById and the audit log. */
+/** Who is making a change, for createdById/updatedById, the audit log and the edit permissions (role). */
 export interface WriteActor {
   userId: string;
+  /** The role from the access token (req.user.role). */
+  role: Role;
   requestId: string | null;
 }
 
@@ -148,6 +150,38 @@ function versionConflict(currentVersion: number): AppError {
 
 function unprocessable(code: string, field: string, message: string): AppError {
   return new AppError(422, code, message, [{ field, message }]);
+}
+
+// Two different 403s with their own codes, so a client can tell "this is not yours" from "propose it as a
+// change request instead". AppError rather than ForbiddenError, which always carries the code FORBIDDEN.
+function villageEditForbidden(): AppError {
+  return new AppError(403, 'VILLAGE_EDIT_FORBIDDEN', 'You can only edit villages that you created', [
+    { field: 'id', message: 'This village was created by someone else' },
+  ]);
+}
+
+function changeRequestRequired(status: VerificationStatus): AppError {
+  return new AppError(
+    403,
+    'CHANGE_REQUEST_REQUIRED',
+    `A ${status} village cannot be edited directly; submit the change as a change request`,
+    [{ field: 'verificationStatus', message: `The village is ${status}` }],
+  );
+}
+
+/**
+ * Who may edit a village directly (PATCH), checked after the village is loaded:
+ * - REVIEWER and ADMIN: always.
+ * - EDITOR: only a village they created that is still PENDING. A VERIFIED or REJECTED village, whoever created
+ *   it, has to be changed through a change request; a PENDING village of someone else is not theirs to edit.
+ */
+function assertCanEdit(village: Village, actor: WriteActor): void {
+  if (actor.role === Role.REVIEWER || actor.role === Role.ADMIN) return;
+
+  if (village.verificationStatus !== VerificationStatus.PENDING) {
+    throw changeRequestRequired(village.verificationStatus);
+  }
+  if (village.createdById !== actor.userId) throw villageEditForbidden();
 }
 
 // The unique constraints are the real guard against duplicates (a pre-check would race with a
@@ -337,7 +371,8 @@ export class VillageService {
 
     await this.withUniqueChecks(() =>
       this.repository.transaction(async (writes, tx) => {
-        const before = await this.loadForWrite(writes, id, version);
+        // 404, then 403, then 409: who may edit is decided before the version is compared.
+        const before = await this.loadForWrite(writes, id, version, (village) => assertCanEdit(village, actor));
         await assertConsistent(writes, changes, before);
         await this.applyVersioned(writes, tx, actor, AuditAction.UPDATE, before, version, {
           ...changes,
@@ -472,10 +507,19 @@ export class VillageService {
     return this.getByIdOrSlug(id);
   }
 
-  /** Reads the row to change: 404 if missing or deleted, 409 if the client's version is already stale. */
-  private async loadForWrite(writes: VillageWriteRepository, id: string, version: number): Promise<Village> {
+  /**
+   * Reads the row to change: 404 if missing or deleted, then `authorize` (403), then 409 if the client's
+   * version is already stale. Nothing has been written at any of these points.
+   */
+  private async loadForWrite(
+    writes: VillageWriteRepository,
+    id: string,
+    version: number,
+    authorize?: (village: Village) => void,
+  ): Promise<Village> {
     const before = await writes.findById(id);
     if (!before || before.deletedAt) throw villageNotFound();
+    authorize?.(before);
     if (before.version !== version) throw versionConflict(before.version);
 
     return before;

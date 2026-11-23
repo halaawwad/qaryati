@@ -21,8 +21,10 @@ const authorityInB = '55555555-5555-4555-8555-555555555555';
 const sourceId = '66666666-6666-4666-8666-666666666666';
 const missingVillageId = '99999999-9999-4999-8999-999999999999';
 
-const editor: WriteActor = { userId: 'editor-1', requestId: 'req-1' };
-const reviewer: WriteActor = { userId: 'reviewer-1', requestId: 'req-2' };
+const editor: WriteActor = { userId: 'editor-1', role: Role.EDITOR, requestId: 'req-1' };
+const otherEditor: WriteActor = { userId: 'editor-2', role: Role.EDITOR, requestId: 'req-3' };
+const reviewer: WriteActor = { userId: 'reviewer-1', role: Role.REVIEWER, requestId: 'req-2' };
+const admin: WriteActor = { userId: 'admin-1', role: Role.ADMIN, requestId: 'req-4' };
 const fakeTx = { fake: 'tx' } as unknown as Prisma.TransactionClient;
 
 function decimal(value: number | null | undefined): Prisma.Decimal | null {
@@ -283,10 +285,11 @@ describe('VillageService writes', () => {
     if (!stored) throw new Error('Missing fake village');
     stored.verificationStatus = VerificationStatus.VERIFIED;
 
-    const updated = await service.update(id, { version: 1, nameEn: 'Test Village' }, editor);
+    // A reviewer: an editor cannot edit a VERIFIED village directly (see "who may edit a village directly").
+    const updated = await service.update(id, { version: 1, nameEn: 'Test Village' }, reviewer);
 
     expect(updated).toMatchObject({ nameEn: 'Test Village', version: 2, verificationStatus: VerificationStatus.PENDING });
-    expect(store.rows.get(id)?.updatedById).toBe('editor-1');
+    expect(store.rows.get(id)?.updatedById).toBe('reviewer-1');
     expect(audit.entries[1]).toMatchObject({
       action: AuditAction.UPDATE,
       before: expect.objectContaining({ version: 1, nameEn: null }),
@@ -556,6 +559,163 @@ describe('VillageService writes', () => {
       });
       expect(store.rows.get(id)?.version).toBe(1);
       expect(audit.entries).toHaveLength(1);
+    });
+  });
+
+  describe('who may edit a village directly', () => {
+    // Created by `editor` (editor-1) unless a test says otherwise, with the given status.
+    let counter = 0;
+    async function villageWith(status: VerificationStatus, creator: WriteActor = editor): Promise<string> {
+      counter += 1;
+      const created = await service.create(
+        { slug: `permission-village-${counter}`, nameAr: 'قرية اختبار', governorateId: governorateA },
+        creator,
+      );
+      const row = store.rows.get(created.id);
+      if (!row) throw new Error('Missing fake village');
+      row.verificationStatus = status;
+      return created.id;
+    }
+
+    const rename = { version: 1, nameEn: 'Renamed' };
+
+    describe('an EDITOR', () => {
+      it('edits their own PENDING village', async () => {
+        const id = await villageWith(VerificationStatus.PENDING);
+
+        const updated = await service.update(id, rename, editor);
+
+        expect(updated).toMatchObject({ nameEn: 'Renamed', version: 2, verificationStatus: VerificationStatus.PENDING });
+        expect(audit.entries.map((entry) => entry.action)).toEqual([AuditAction.CREATE, AuditAction.UPDATE]);
+      });
+
+      it("cannot edit another editor's PENDING village: 403 VILLAGE_EDIT_FORBIDDEN", async () => {
+        const id = await villageWith(VerificationStatus.PENDING, otherEditor);
+
+        await expect(service.update(id, rename, editor)).rejects.toMatchObject({
+          statusCode: 403,
+          code: 'VILLAGE_EDIT_FORBIDDEN',
+        });
+      });
+
+      it('cannot edit a village without a creator (for example seeded data)', async () => {
+        const id = await villageWith(VerificationStatus.PENDING);
+        const row = store.rows.get(id);
+        if (row) row.createdById = null;
+
+        await expect(service.update(id, rename, editor)).rejects.toMatchObject({ statusCode: 403, code: 'VILLAGE_EDIT_FORBIDDEN' });
+      });
+
+      it('cannot edit a VERIFIED village, even their own: 403 CHANGE_REQUEST_REQUIRED', async () => {
+        const id = await villageWith(VerificationStatus.VERIFIED);
+
+        await expect(service.update(id, rename, editor)).rejects.toMatchObject({
+          statusCode: 403,
+          code: 'CHANGE_REQUEST_REQUIRED',
+          message: expect.stringContaining('change request'),
+          details: [{ field: 'verificationStatus', message: 'The village is VERIFIED' }],
+        });
+      });
+
+      it('cannot edit a REJECTED village, even their own: 403 CHANGE_REQUEST_REQUIRED', async () => {
+        const id = await villageWith(VerificationStatus.REJECTED);
+
+        await expect(service.update(id, rename, editor)).rejects.toMatchObject({
+          statusCode: 403,
+          code: 'CHANGE_REQUEST_REQUIRED',
+          message: expect.stringContaining('change request'),
+        });
+      });
+
+      it("gets CHANGE_REQUEST_REQUIRED, not VILLAGE_EDIT_FORBIDDEN, for someone else's VERIFIED village", async () => {
+        const id = await villageWith(VerificationStatus.VERIFIED, otherEditor);
+
+        await expect(service.update(id, rename, editor)).rejects.toMatchObject({ statusCode: 403, code: 'CHANGE_REQUEST_REQUIRED' });
+      });
+    });
+
+    describe('a REVIEWER or an ADMIN', () => {
+      it('REVIEWER edits a VERIFIED village; it goes back to PENDING', async () => {
+        const id = await villageWith(VerificationStatus.VERIFIED);
+
+        const updated = await service.update(id, rename, reviewer);
+
+        expect(updated).toMatchObject({ version: 2, verificationStatus: VerificationStatus.PENDING });
+        expect(store.rows.get(id)?.updatedById).toBe('reviewer-1');
+      });
+
+      it("REVIEWER edits a REJECTED village and another editor's PENDING village", async () => {
+        const rejected = await villageWith(VerificationStatus.REJECTED);
+        await expect(service.update(rejected, rename, reviewer)).resolves.toMatchObject({ version: 2 });
+
+        const pending = await villageWith(VerificationStatus.PENDING, otherEditor);
+        await expect(service.update(pending, rename, reviewer)).resolves.toMatchObject({ version: 2 });
+      });
+
+      it("ADMIN edits another editor's village, whatever its status", async () => {
+        for (const status of [VerificationStatus.PENDING, VerificationStatus.VERIFIED, VerificationStatus.REJECTED]) {
+          const id = await villageWith(status, otherEditor);
+
+          await expect(service.update(id, rename, admin)).resolves.toMatchObject({ version: 2, verificationStatus: VerificationStatus.PENDING });
+          expect(store.rows.get(id)?.updatedById).toBe('admin-1');
+        }
+      });
+    });
+
+    describe('a refused edit', () => {
+      it('writes no audit row, no change and no new version', async () => {
+        const id = await villageWith(VerificationStatus.VERIFIED);
+        const before = { ...store.rows.get(id) };
+        const entriesBefore = audit.entries.length;
+
+        await expect(service.update(id, { ...rename, slug: 'new-slug' }, editor)).rejects.toMatchObject({ statusCode: 403 });
+
+        expect(audit.entries).toHaveLength(entriesBefore);
+        expect(store.rows.get(id)).toEqual(before);
+        expect(store.rows.get(id)?.version).toBe(1);
+        expect(store.rows.get(id)?.verificationStatus).toBe(VerificationStatus.VERIFIED);
+      });
+
+      it("a refused edit of another editor's PENDING village also changes nothing", async () => {
+        const id = await villageWith(VerificationStatus.PENDING, otherEditor);
+        const before = { ...store.rows.get(id) };
+        const entriesBefore = audit.entries.length;
+
+        await expect(service.update(id, rename, editor)).rejects.toMatchObject({ statusCode: 403 });
+
+        expect(audit.entries).toHaveLength(entriesBefore);
+        expect(store.rows.get(id)).toEqual(before);
+      });
+
+      it('is checked in the order 404, then 403, then 409', async () => {
+        // 404 first: a missing or deleted village is 404 for an editor, not 403.
+        await expect(service.update(missingVillageId, rename, editor)).rejects.toMatchObject({ statusCode: 404 });
+        const deleted = await villageWith(VerificationStatus.PENDING);
+        await service.remove(deleted, admin);
+        await expect(service.update(deleted, rename, editor)).rejects.toMatchObject({ statusCode: 404 });
+
+        // 403 before 409: a stale version from someone who may not edit is still 403.
+        const verified = await villageWith(VerificationStatus.VERIFIED);
+        const row = store.rows.get(verified);
+        if (row) row.version = 5;
+        await expect(service.update(verified, { version: 1, nameEn: 'Stale' }, editor)).rejects.toMatchObject({
+          statusCode: 403,
+          code: 'CHANGE_REQUEST_REQUIRED',
+        });
+
+        // 409 for someone who may edit.
+        await expect(service.update(verified, { version: 1, nameEn: 'Stale' }, reviewer)).rejects.toMatchObject({
+          statusCode: 409,
+          code: 'VERSION_CONFLICT',
+        });
+      });
+    });
+
+    it('does not apply to verify and reject, which are limited by role on the route', async () => {
+      const id = await villageWith(VerificationStatus.PENDING, otherEditor);
+
+      await expect(service.verify(id, { version: 1 }, reviewer)).resolves.toMatchObject({ verificationStatus: VerificationStatus.VERIFIED });
+      await expect(service.reject(id, { version: 2 }, admin)).resolves.toMatchObject({ verificationStatus: VerificationStatus.REJECTED });
     });
   });
 
