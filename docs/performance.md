@@ -109,6 +109,39 @@ The search term is passed to `ILIKE` as `%term%` without escaping, so `%` and `_
 
 ## Write scenario
 
-[`k6/village-writes.js`](../k6/village-writes.js) is written but has **not been run**. It needs the village write endpoints, which are in an open pull request; the results will be added here after it is merged into `main`.
+[`k6/village-writes.js`](../k6/village-writes.js) was run against the village write endpoints on `main` (#31, #38 and #39), with the `UNION` search and the trigram indexes in place. It is a different kind of load from the search test: every request writes, in one transaction, the change and its audit row.
 
-Each iteration walks one `perf-w-` village through create, update, update, a stale update, verify, update, reject and delete, so no two virtual users touch the same row. The stale update sends an old `version` on purpose: its 409 is the correct answer, so it is counted separately (`expected_version_conflicts`) and is not an error, while a 409 anywhere else, or any other unexpected status, counts as one. `npm run perf:clean` removes the villages and their audit rows afterwards.
+**What it does.** Each iteration walks one `perf-w-` village through create, update, update, a stale update, verify, update, reject and delete (eight requests, seven of them writes), so no two virtual users ever touch the same row. The stale update sends an old `version` on purpose: its 409 is the correct answer, so it is counted separately (`expected_version_conflicts`) and is not an error, while a 409 anywhere else, or any other unexpected status, counts as one. The scenario logs in once as the seeded admin and uses that token for every request; an admin may call all five endpoints.
+
+**Setup.** The same as for the search measurements: 20 virtual users, 60 s measured after a 15 s warm-up that is discarded, the same 20,014 villages and 26,068 alternate names, the same machine and Docker stack, `RATE_LIMIT_ENABLED=false` locally for the run only, and the same quiet-machine gate (CPU 9 %, lowest free RAM 676 MB in the 30 s before the warm-up; Chrome and Edge not running). The image was built from the merge of `main` (`dec2f22`) into the performance branch.
+
+### Results
+
+20 virtual users for 60 s: 1,023 complete iterations, 8,185 requests (the 8,184 of the iterations and the login in setup), **133.52 requests per second**, **0 errors**.
+
+| | p50 | p95 | p99 | Average | Requests | Per second |
+|---|---|---|---|---|---|---|
+| **All requests** | **141.9 ms** | **215.6 ms** | **289.5 ms** | 146.9 ms | 8,185 | 133.52 |
+| `create` | 146.0 ms | 204.0 ms | 323.4 ms | 156.3 ms | 1,023 | 16.7 |
+| `update` | 152.4 ms | 229.9 ms | 313.2 ms | 161.6 ms | 3,069 | 50.1 |
+| `stale_update` (409 expected) | 88.4 ms | 138.6 ms | 190.2 ms | 94.2 ms | 1,023 | 16.7 |
+| `verify` | 152.1 ms | 231.5 ms | 302.4 ms | 159.2 ms | 1,023 | 16.7 |
+| `reject` | 149.0 ms | 220.7 ms | 270.4 ms | 156.9 ms | 1,023 | 16.7 |
+| `delete` (soft delete) | 120.4 ms | 168.2 ms | 200.6 ms | 123.2 ms | 1,023 | 16.7 |
+
+The slowest single request was a `create` at 1,103 ms; every other request finished within 720 ms.
+
+**Version conflicts.** 1,023 expected 409s (one stale update per iteration, counted on their own) and **0 unexpected 409s**. No other status outside the expected ones either.
+
+**Audit.** `audit_logs` grew from 1,540 to 8,701 rows during the measured run: **+7,161, exactly the 7,161 successful writes counted by k6** (7 per iteration). The stale updates, which are refused before anything is written, added no row. After the run, every complete flow had left its rows: the numbers of `CREATE`, `VERIFY`, `REJECT` and `DELETE` rows for these villages were equal, and there were three times as many `UPDATE` rows. [Result](../k6/results/2026-11-23-writes-20k.txt) and [raw k6 output](../k6/results/2026-11-23-writes-20k.json).
+
+### Caveats
+
+- **One run of 60 s.** The same allowance as for the search measurements applies (about ±10 %); do not read differences of a few milliseconds between the request kinds as real.
+- **No contention is measured.** Every iteration works on its own village, so the numbers show the cost of a write on its own, not what happens when several people edit the same row. The only conflicts are the deliberate stale updates.
+- **The cost of the indexes on writes is not separated.** The four trigram GIN indexes are maintained when a village or a name is written. Nothing was measured without them, so this page cannot say how much of the roughly 150 ms per write they account for.
+- **One token, one role.** All requests use the admin's token. The role check is the same cost for every role, but the scenario says nothing about the other roles, and the permission rules for editors (own `PENDING` villages only) are covered by tests, not by this load.
+- **The table grows during the run.** The warm-up and the measured run together created 1,243 villages (all soft-deleted by the scenario), on top of the 20,014, and the audit table grew by the same amount of rows; at this size that should not matter, but the data is not exactly the same at the start and at the end.
+- **Closed-loop, small hardware.** Twenty virtual users each wait for their answer before the next request, so the request rate follows from the latencies, on a laptop with the database, the application and the load generator on the same machine. Absolute numbers will differ elsewhere.
+
+`npm run perf:clean` removes the `perf-` and `perf-w-` villages, their alternate names and their audit rows afterwards. `SCENARIO=writes k6/tools/measure.sh` reruns the measurement with the same procedure (see the [tools README](../k6/tools/README.md)).
