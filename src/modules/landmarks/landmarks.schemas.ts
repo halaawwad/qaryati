@@ -27,6 +27,28 @@ export const listLandmarksQuerySchema = z.object({
   order: z.enum(['asc', 'desc']).optional(),
 });
 
+export const createLandmarkSchema = z.strictObject({
+  nameAr: z.string().trim().min(1).max(200),
+  nameEn: z.string().trim().min(1).max(200).optional(),
+  landmarkType: z.enum(LandmarkType),
+  description: z.string().trim().max(5000).optional(),
+  latitude: z.number().min(-90).max(90).nullable().optional(),
+  longitude: z.number().min(-180).max(180).nullable().optional(),
+  sourceId: z.uuid(),
+}).superRefine(({ latitude, longitude }, ctx) => {
+  const hasLatitude = latitude !== undefined && latitude !== null;
+  const hasLongitude = longitude !== undefined && longitude !== null;
+
+  if (hasLatitude !== hasLongitude) {
+    ctx.addIssue({
+      code: 'custom',
+      path: [hasLatitude ? 'longitude' : 'latitude'],
+      message: 'Latitude and longitude must both be numbers or both be omitted/null',
+    });
+  }
+});
+
+export type CreateLandmarkInput = z.infer<typeof createLandmarkSchema>;
 export type VillageLandmarksParams = z.infer<typeof villageLandmarksParamsSchema>;
 export type LandmarkParams = z.infer<typeof landmarkParamsSchema>;
 export type ListLandmarksQuery = z.infer<typeof listLandmarksQuerySchema>;

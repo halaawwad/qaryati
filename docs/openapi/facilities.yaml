@@ -1,0 +1,350 @@
+openapi: "3.0.3"
+info: { title: "Qaryati API - Facilities", version: "1.0.0", description: "Documents the two GET APIs implemented on the local feature/facilities branch; their implementation and route mounts are absent from the documentation branch. This file does not assert deployment availability or merge into main. Paths include /api/v1, so use a server origin without that prefix. Public GET operations require no authentication. Every response carries X-Request-Id. Both operations are subject to the configured global rate limit (429)." }
+servers:
+  - { url: "/", description: "Current API origin; replace with the target server origin when importing." }
+tags:
+  - { name: "Facilities", description: "Facilities APIs." }
+x-implementation-source: { ref: "feature/facilities", commit: "3f488aa30536f261c38a176171d1fd7a0ae763c9", module: "src/modules/facilities/", tests: "tests/facilities*.test.ts" }
+paths:
+  /api/v1/villages/{villageId}/facilities:
+    get:
+      tags: ["Facilities"]
+      operationId: "listVillageFacilities"
+      summary: "List a village's facilities"
+      description: "Only non-deleted records belonging to a non-deleted village are visible. PENDING, VERIFIED and REJECTED records are public. Source deletion does not hide records. A missing or deleted village returns 404. An active village without matches, or a page beyond the results, returns 200 with an empty data array. Unknown query keys are stripped and ignored. After defaults and the limit cap, (page - 1) * effectiveLimit must be a safe integer no greater than 2147483647; otherwise 400 with field query.page."
+      security: []
+      parameters:
+        - { $ref: "#/components/parameters/ContentVillageId" }
+        - { $ref: "#/components/parameters/ContentPage" }
+        - { $ref: "#/components/parameters/ContentLimit" }
+        - name: "search"
+          in: "query"
+          description: "Case-insensitive literal contains search across name and description. Leading and trailing whitespace is trimmed before the 100-character limit is checked; blank text is ignored. Percent signs (%), underscores (_) and backslashes are matched literally, not as wildcard or escape syntax supplied by the caller. Send the literal text without adding SQL escapes; URL-encode query values (for example, %25 for a percent sign and %5C for a backslash)."
+          schema: { type: "string", maxLength: 100 }
+          example: "مدرسة"
+        - name: "facilityType"
+          in: "query"
+          description: "Exact, case-sensitive enum value; whitespace is not trimmed."
+          schema: { $ref: "#/components/schemas/FacilityType" }
+        - { $ref: "#/components/parameters/ContentVerificationStatus" }
+        - name: "asOfYear"
+          in: "query"
+          description: "Exact match on the stored signed 32-bit integer year. Input is trimmed and converted with Number(), then checked for an integer in range. Negative years and zero are accepted; blank values are rejected. When supplied, records with null asOfYear do not match."
+          schema: { type: "integer", format: "int32", minimum: -2147483648, maximum: 2147483647 }
+          example: 2014
+        - name: "sort"
+          in: "query"
+          description: "Primary sort field. ID ascending is always appended as a stable tie-breaker. Null asOfYear values sort last in either direction."
+          schema:
+            type: "string"
+            enum: ["name", "asOfYear", "createdAt", "updatedAt"]
+            default: "name"
+        - { $ref: "#/components/parameters/ContentOrder" }
+      responses:
+        "200":
+          description: "A page of facilities."
+          headers:
+            X-Request-Id:
+              description: "Request correlation ID."
+              schema: { type: "string" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FacilityListResponse" }
+              examples:
+                page:
+                  summary: "One matching record"
+                  value:
+                    data:
+                      - id: "22222222-2222-4222-8222-222222222222"
+                        villageId: "11111111-1111-4111-8111-111111111111"
+                        facilityType: "SCHOOL"
+                        name: "مدرسة القرية"
+                        description: null
+                        asOfYear: null
+                        latitude: 32.123456
+                        longitude: 0
+                        sourceId: null
+                        verificationStatus: "PENDING"
+                        version: 1
+                        createdAt: "2026-10-10T00:00:00.000Z"
+                        updatedAt: "2026-10-10T00:00:00.000Z"
+                    meta:
+                      page: 1
+                      limit: 20
+                      total: 1
+                      totalPages: 1
+                      hasNextPage: false
+                      hasPrevPage: false
+                empty:
+                  summary: "No matching records on page 1"
+                  value:
+                    data: []
+                    meta:
+                      page: 1
+                      limit: 20
+                      total: 0
+                      totalPages: 0
+                      hasNextPage: false
+                      hasPrevPage: false
+        "400": { $ref: "#/components/responses/ContentValidationError" }
+        "404": { $ref: "#/components/responses/ContentVillageNotFound" }
+        "429": { $ref: "#/components/responses/ContentTooManyRequests" }
+        "500": { $ref: "#/components/responses/ContentInternalError" }
+  /api/v1/facilities/{id}:
+    get:
+      tags: ["Facilities"]
+      operationId: "getFacility"
+      summary: "Get a facility"
+      description: "Only non-deleted records belonging to a non-deleted village are visible. PENDING, VERIFIED and REJECTED records are public. Source deletion does not hide records."
+      security: []
+      parameters:
+        - { $ref: "#/components/parameters/ContentId" }
+      responses:
+        "200":
+          description: "The facility, including nullable coordinates."
+          headers:
+            X-Request-Id:
+              description: "Request correlation ID."
+              schema: { type: "string" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FacilityResponse" }
+              example:
+                data:
+                  id: "22222222-2222-4222-8222-222222222222"
+                  villageId: "11111111-1111-4111-8111-111111111111"
+                  facilityType: "SCHOOL"
+                  name: "مدرسة القرية"
+                  description: null
+                  asOfYear: null
+                  latitude: null
+                  longitude: null
+                  sourceId: null
+                  verificationStatus: "PENDING"
+                  version: 1
+                  createdAt: "2026-10-10T00:00:00.000Z"
+                  updatedAt: "2026-10-10T00:00:00.000Z"
+        "400": { $ref: "#/components/responses/ContentIdValidationError" }
+        "404": { $ref: "#/components/responses/FacilityNotFound" }
+        "429": { $ref: "#/components/responses/ContentTooManyRequests" }
+        "500": { $ref: "#/components/responses/ContentInternalError" }
+components:
+  parameters:
+    ContentVillageId:
+      name: "villageId"
+      in: "path"
+      required: true
+      description: "Village UUID; slugs are not accepted."
+      schema: { type: "string", format: "uuid" }
+      example: "11111111-1111-4111-8111-111111111111"
+    ContentId:
+      name: "id"
+      in: "path"
+      required: true
+      description: "Resource UUID."
+      schema: { type: "string", format: "uuid" }
+      example: "22222222-2222-4222-8222-222222222222"
+    ContentPage:
+      name: "page"
+      in: "query"
+      description: "Positive integer. Defaults to 1."
+      schema: { type: "integer", minimum: 1, default: 1 }
+      example: 1
+    ContentLimit:
+      name: "limit"
+      in: "query"
+      description: "Positive integer. Values above 100 are accepted and capped at 100; defaults to 20."
+      schema: { type: "integer", minimum: 1, default: 20 }
+      example: 20
+    ContentVerificationStatus:
+      name: "verificationStatus"
+      in: "query"
+      description: "Exact, case-sensitive status. Omit to include all three statuses."
+      schema: { $ref: "#/components/schemas/ContentVerificationStatus" }
+    ContentOrder:
+      name: "order"
+      in: "query"
+      description: "Sort direction; ties always use ID ascending."
+      schema:
+        type: "string"
+        enum: ["asc", "desc"]
+        default: "asc"
+  schemas:
+    ContentVerificationStatus:
+      type: "string"
+      enum: ["PENDING", "VERIFIED", "REJECTED"]
+    ContentPaginationMeta:
+      type: "object"
+      required: ["page", "limit", "total", "totalPages", "hasNextPage", "hasPrevPage"]
+      properties:
+        page: { type: "integer", minimum: 1, description: "Requested page, including when it is beyond the last result." }
+        limit: { type: "integer", minimum: 1, maximum: 100, description: "Effective page size after the cap." }
+        total: { type: "integer", minimum: 0, description: "Total matching visible records before pagination." }
+        totalPages: { type: "integer", minimum: 0, description: "Zero when total is zero; otherwise ceil(total / limit)." }
+        hasNextPage: { type: "boolean", description: "Whether page is less than totalPages." }
+        hasPrevPage: { type: "boolean", description: "Whether page is greater than 1, even when no results match." }
+    ContentErrorDetail:
+      type: "object"
+      required: ["field", "message"]
+      properties:
+        field: { type: "string", description: "Validation location, such as params.villageId, query.page or body.sourceId." }
+        message: { type: "string" }
+    ContentErrorResponse:
+      type: "object"
+      required: ["error"]
+      properties:
+        error:
+          type: "object"
+          required: ["code", "message", "details", "requestId"]
+          properties:
+            code: { type: "string" }
+            message: { type: "string" }
+            details:
+              type: "array"
+              items: { $ref: "#/components/schemas/ContentErrorDetail" }
+            requestId: { type: "string", description: "Also returned in the X-Request-Id response header." }
+            stack: { type: "string", description: "Optional stack trace on HTTP 500 errors in development only." }
+    FacilityType:
+      type: "string"
+      enum: ["SCHOOL", "CLINIC", "LIBRARY", "COMMUNITY_CENTER", "PARK", "SPORTS", "OTHER"]
+    Facility:
+      type: "object"
+      required: ["id", "villageId", "facilityType", "name", "description", "latitude", "longitude", "sourceId", "verificationStatus", "version", "createdAt", "updatedAt", "asOfYear"]
+      properties:
+        id: { type: "string", format: "uuid" }
+        villageId: { type: "string", format: "uuid" }
+        facilityType: { $ref: "#/components/schemas/FacilityType" }
+        name: { type: "string" }
+        description: { type: "string", nullable: true }
+        latitude: { type: "number", nullable: true, description: "Decimal coordinate serialized as a JSON number, or null." }
+        longitude: { type: "number", nullable: true, description: "Decimal coordinate serialized as a JSON number, or null." }
+        sourceId: { type: "string", format: "uuid", nullable: true, description: "Source identifier only; no source object is embedded." }
+        verificationStatus: { $ref: "#/components/schemas/ContentVerificationStatus" }
+        version: { type: "integer" }
+        createdAt: { type: "string", format: "date-time" }
+        updatedAt: { type: "string", format: "date-time" }
+        asOfYear: { type: "integer", format: "int32", minimum: -2147483648, maximum: 2147483647, nullable: true }
+      description: "Public representation shared by list and detail responses. Nullable properties are returned as null; creator/updater IDs and deletedAt are not exposed."
+      example:
+        id: "22222222-2222-4222-8222-222222222222"
+        villageId: "11111111-1111-4111-8111-111111111111"
+        facilityType: "SCHOOL"
+        name: "مدرسة القرية"
+        description: null
+        asOfYear: null
+        latitude: 32.123456
+        longitude: 0
+        sourceId: null
+        verificationStatus: "PENDING"
+        version: 1
+        createdAt: "2026-10-10T00:00:00.000Z"
+        updatedAt: "2026-10-10T00:00:00.000Z"
+    FacilityResponse:
+      type: "object"
+      required: ["data"]
+      properties:
+        data: { $ref: "#/components/schemas/Facility" }
+    FacilityListResponse:
+      type: "object"
+      required: ["data", "meta"]
+      properties:
+        data:
+          type: "array"
+          items: { $ref: "#/components/schemas/Facility" }
+        meta: { $ref: "#/components/schemas/ContentPaginationMeta" }
+  responses:
+    ContentValidationError:
+      description: "Invalid path or query parameters (VALIDATION_ERROR); malformed JSON is INVALID_JSON when a JSON body is sent."
+      headers:
+        X-Request-Id:
+          description: "Request correlation ID."
+          schema: { type: "string" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ContentErrorResponse" }
+          example:
+            error:
+              code: "VALIDATION_ERROR"
+              message: "Request validation failed"
+              details:
+                - { field: "params.villageId", message: "Invalid UUID" }
+              requestId: "example-request-123"
+    ContentVillageNotFound:
+      description: "Village does not exist or is soft-deleted."
+      headers:
+        X-Request-Id:
+          description: "Request correlation ID."
+          schema: { type: "string" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ContentErrorResponse" }
+          example:
+            error:
+              code: "NOT_FOUND"
+              message: "Village not found"
+              details: []
+              requestId: "example-request-123"
+    ContentInternalError:
+      description: "Unexpected database or application failure. Production responses do not expose internal error details."
+      headers:
+        X-Request-Id:
+          description: "Request correlation ID."
+          schema: { type: "string" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ContentErrorResponse" }
+          example:
+            error:
+              code: "INTERNAL_ERROR"
+              message: "Internal server error"
+              details: []
+              requestId: "example-request-123"
+    ContentTooManyRequests:
+      description: "Global rate limit exceeded when rate limiting is enabled."
+      headers:
+        X-Request-Id:
+          description: "Request correlation ID."
+          schema: { type: "string" }
+        Retry-After:
+          description: "Seconds until retry."
+          schema: { type: "integer" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ContentErrorResponse" }
+          example:
+            error:
+              code: "TOO_MANY_REQUESTS"
+              message: "Too many requests; please try again later"
+              details: []
+              requestId: "example-request-123"
+    FacilityNotFound:
+      description: "Resource is missing, soft-deleted, or belongs to a soft-deleted village."
+      headers:
+        X-Request-Id:
+          description: "Request correlation ID."
+          schema: { type: "string" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ContentErrorResponse" }
+          example:
+            error:
+              code: "NOT_FOUND"
+              message: "Facility not found"
+              details: []
+              requestId: "example-request-123"
+    ContentIdValidationError:
+      description: "Invalid resource UUID (VALIDATION_ERROR)."
+      headers:
+        X-Request-Id:
+          description: "Request correlation ID."
+          schema: { type: "string" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ContentErrorResponse" }
+          example:
+            error:
+              code: "VALIDATION_ERROR"
+              message: "Request validation failed"
+              details:
+                - { field: "params.id", message: "Invalid UUID" }
+              requestId: "example-request-123"
