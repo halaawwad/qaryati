@@ -176,8 +176,9 @@ Auth actions (register, login, refresh, logout) do not write audit rows.
 
 | Workflow | On `main` | Planned |
 |---|---|---|
-| Content creation (`PENDING`) with audit | villages, alternate names, nearby places, sources, landmarks, economy, facilities | population |
-| Update with role and ownership rules (`EDITOR`: own `PENDING` only) | villages, alternate names | other content |
+| Content creation (`PENDING`) with audit | villages, alternate names, sources, landmarks, economy, facilities | population |
+| Nearby places (no `verification_status`, so never `PENDING`) | Add with audit; ADMIN delete is a hard delete with audit | — |
+| Update with role and ownership rules (`EDITOR`: own `PENDING` only) | villages, alternate names, sources | other content |
 | Verify / reject endpoints | villages | population, other content |
 | Geo enrichment | `villageService.applyGeoEnrichment()` (no route) | Nominatim client in `integrations/geo` |
 | Population records (multiple sources per year) | Table and constraints only | Read and create endpoints, automatic `needs_review` |
