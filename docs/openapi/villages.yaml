@@ -19,7 +19,8 @@ info:
 
     | Endpoint | Roles |
     |---|---|
-    | `POST /villages`, `PATCH /villages/{id}` | `EDITOR`, `REVIEWER`, `ADMIN` |
+    | `POST /villages` | `EDITOR`, `REVIEWER`, `ADMIN` |
+    | `PATCH /villages/{id}` | `REVIEWER` and `ADMIN` for any village; `EDITOR` only for a village they created that is still `PENDING` (see the endpoint) |
     | `POST /villages/{id}/verify`, `POST /villages/{id}/reject` | `REVIEWER`, `ADMIN` |
     | `DELETE /villages/{id}` | `ADMIN` |
     | `POST /villages/{id}/names`, `PATCH /villages/{id}/names/{nameId}` | `EDITOR`, `REVIEWER`, `ADMIN` |
@@ -53,7 +54,7 @@ servers:
     description: Local Docker (docker compose up)
 x-implementation-source:
   reads: { ref: main, module: src/modules/villages/ }
-  writes: { ref: feature/village-writes, pullRequest: 31, commit: b598068, tests: 'tests/villages.writes.test.ts, tests/villages.repository.test.ts' }
+  writes: { ref: feature/village-writes, pullRequest: 31, commit: ba6d78a, tests: 'tests/villages.writes.test.ts, tests/villages.repository.test.ts' }
   relations: { ref: feature/village-relations, commit: 2ccafde, tests: tests/village-relations.test.ts }
 tags:
   - name: Villages
@@ -232,6 +233,18 @@ paths:
         least one field to change. On success the village gets `version + 1`, goes back to `PENDING`, and
         `updatedById` is the caller.
 
+        **Who may edit.** The role is checked after the village is loaded and before the version is compared,
+        so the order of the answers is 404, then 403, then 409. A refused request writes nothing: no change, no
+        audit row, and the `version` stays as it was.
+
+        - `REVIEWER` and `ADMIN` may edit any village, whatever its status.
+        - An `EDITOR` may edit a village only if they created it **and** it is still `PENDING`. Someone else's
+          `PENDING` village is 403 `VILLAGE_EDIT_FORBIDDEN`. A `VERIFIED` or `REJECTED` village, whoever created
+          it, is 403 `CHANGE_REQUEST_REQUIRED`: the change has to be submitted as a change request.
+        - A village without a recorded creator (for example seeded data) cannot be edited by an `EDITOR`.
+
+        **Other rules.**
+
         - A stale `version` returns 409 `VERSION_CONFLICT` (the details give the current version).
         - The consistency rules (local authority in the governorate, name origin with a source, coordinates
           together) apply to the final state, so a field missing from the body keeps its stored value. Moving
@@ -260,7 +273,31 @@ paths:
                   data: { $ref: '#/components/schemas/VillageDetails' }
         '400': { $ref: '#/components/responses/ValidationError' }
         '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
+        '403':
+          description: |
+            The caller may not edit this village. `code` is `FORBIDDEN` (the role is not allowed on this
+            endpoint), `VILLAGE_EDIT_FORBIDDEN` (an editor and a `PENDING` village created by someone else) or
+            `CHANGE_REQUEST_REQUIRED` (an editor and a `VERIFIED` or `REJECTED` village). Nothing was written.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              examples:
+                notYours:
+                  summary: An editor and a village created by someone else
+                  value:
+                    error:
+                      code: VILLAGE_EDIT_FORBIDDEN
+                      message: You can only edit villages that you created
+                      details: [{ field: id, message: This village was created by someone else }]
+                      requestId: 3a7d-example
+                changeRequest:
+                  summary: An editor and a VERIFIED or REJECTED village
+                  value:
+                    error:
+                      code: CHANGE_REQUEST_REQUIRED
+                      message: A VERIFIED village cannot be edited directly; submit the change as a change request
+                      details: [{ field: verificationStatus, message: The village is VERIFIED }]
+                      requestId: 5e2b-example
         '404': { $ref: '#/components/responses/VillageNotFound' }
         '409':
           description: A stale `version` (`VERSION_CONFLICT`), or the slug or PCBS code is already used (`SLUG_TAKEN`, `PCBS_CODE_TAKEN`).
@@ -1051,7 +1088,8 @@ components:
               type: string
               description: |
                 Machine-readable code, e.g. VALIDATION_ERROR, INVALID_JSON, UNAUTHORIZED, FORBIDDEN, NOT_FOUND,
-                VERSION_CONFLICT, SLUG_TAKEN, PCBS_CODE_TAKEN, VILLAGE_NAME_EXISTS, NEARBY_RELATION_EXISTS,
+                VILLAGE_EDIT_FORBIDDEN, CHANGE_REQUEST_REQUIRED, VERSION_CONFLICT, SLUG_TAKEN, PCBS_CODE_TAKEN,
+                VILLAGE_NAME_EXISTS, NEARBY_RELATION_EXISTS,
                 NEARBY_PLACE_NAME_EXISTS, GOVERNORATE_NOT_FOUND, LOCAL_AUTHORITY_NOT_FOUND,
                 LOCAL_AUTHORITY_GOVERNORATE_MISMATCH, NAME_ORIGIN_REQUIRES_SOURCE, SOURCE_NOT_FOUND,
                 NEARBY_SELF_RELATION, RELATED_VILLAGE_NOT_FOUND, VILLAGE_HAS_NO_COORDINATES, TOO_MANY_REQUESTS,
