@@ -150,17 +150,22 @@ export interface VillageRepository {
   findMany(params: VillageListParams): Promise<{ items: VillageListItem[]; total: number }>;
   /** Returns null when the village does not exist or is soft-deleted. */
   findDetails(lookup: VillageLookup): Promise<VillageDetails | null>;
+
   /** True only for an active village; a supplied transaction holds a shared row lock. */
   exists(id: string, client?: Prisma.TransactionClient): Promise<boolean>;
+
   /** Returns null when the village does not exist or is soft-deleted. */
   findLocation(lookup: VillageLookup): Promise<VillageLocation | null>;
+
   /**
-   * Rows where the village is on either side of the relation. Rows recorded by a soft-deleted
-   * village (reverse direction) are excluded.
+   * Rows where the village is on either side of the relation.
+   * Rows recorded by a soft-deleted village (reverse direction) are excluded.
    */
   findNearbyPlaceRows(villageId: string): Promise<NearbyPlaceRow[]>;
-  /** Active villages with coordinates within radiusKm of the point, nearest first, excluding villageId. */
+
+  /** Active villages with coordinates within radiusKm, nearest first, excluding villageId. */
   findVillagesWithinRadius(search: RadiusSearch): Promise<VillageWithinRadius[]>;
+
 }
 
 const EARTH_RADIUS_KM = 6371;

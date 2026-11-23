@@ -36,7 +36,8 @@ export interface SourceRepository {
   update(id: string, input: UpdateSourceInput, context: SourceUpdateContext): Promise<SourceDetails>;
   create(input: CreateSourceInput, context: SourceCreateContext): Promise<SourceDetails>;
   findMany(params: SourceListParams): Promise<{ items: SourceDetails[]; total: number }>;
-  findById(id: string): Promise<SourceDetails | null>;
+  /** Only active sources; a supplied transaction holds a shared row lock. */
+  findById(id: string, client?: Prisma.TransactionClient): Promise<SourceDetails | null>;
 }
 
 const sourceSelect = {
@@ -202,8 +203,15 @@ export const sourceRepository: SourceRepository = {
     });
   },
 
-  findById(id) {
-    return prisma.source.findFirst({
+  async findById(id, client) {
+    if (client) {
+      // Protect deleted_at as well as the FK key until the dependent write commits.
+      const rows = await client.$queryRaw<{ id: string }[]>`
+        SELECT id FROM sources WHERE id = ${id}::uuid AND deleted_at IS NULL FOR SHARE
+      `;
+      if (rows.length === 0) return null;
+    }
+    return (client ?? prisma).source.findFirst({
       where: { id, deletedAt: null },
       select: sourceSelect,
     });
