@@ -1,19 +1,46 @@
-
-import { PlaceType, type PlaceRelation, type Prisma } from '@prisma/client';
+import {
+  AuditAction,
+  PlaceType,
+  Prisma,
+  Role,
+  VerificationStatus,
+  type PlaceRelation,
+  type Village,
+} from '@prisma/client';
 import { AppError, NotFoundError } from '../../shared/errors.js';
 
 import { buildPaginationMeta, parsePagination, type PaginationMeta } from '../../shared/pagination.js';
 import {
   villageRepository,
   type NearbyPlaceRow,
+  type VillageChanges,
   type VillageDetails,
   type VillageListItem,
   type VillageLookup,
   type VillageRef,
   type VillageRepository,
   type VillageWithinRadius,
+  type VillageWriteData,
+  type VillageWriteRepository,
 } from './villages.repository.js';
-import type { ListVillagesQuery, NearbyVillagesQuery } from './villages.schemas.js';
+import { villageAudit, type VillageAuditRecorder } from './villages.audit.js';
+import type {
+  CreateVillageInput,
+  ListVillagesQuery,
+  NearbyVillagesQuery,
+  UpdateVillageInput,
+  VillageVersionInput,
+} from './villages.schemas.js';
+
+/** Who is making a change, for createdById/updatedById, the audit log and the edit permissions (role). */
+export interface WriteActor {
+  userId: string;
+  /** The role from the access token (req.user.role). */
+  role: Role;
+  requestId: string | null;
+}
+
+const AUDIT_ENTITY_TYPE = 'village';
 
 export interface VillageListResult {
   items: VillageListItem[];
@@ -68,8 +95,126 @@ function toNearbyPlace(row: NearbyPlaceRow, villageId: string): NearbyPlace {
   };
 }
 
+function villageNotFound(): NotFoundError {
+  return new NotFoundError('Village not found');
+}
+
+function versionConflict(currentVersion: number): AppError {
+  return new AppError(409, 'VERSION_CONFLICT', 'The village was changed by someone else; reload it and retry', [
+    { field: 'version', message: `Current version is ${currentVersion}` },
+  ]);
+}
+
+function unprocessable(code: string, field: string, message: string): AppError {
+  return new AppError(422, code, message, [{ field, message }]);
+}
+
+// Two different 403s with their own codes, so a client can tell "this is not yours" from "propose it as a
+// change request instead". AppError rather than ForbiddenError, which always carries the code FORBIDDEN.
+function villageEditForbidden(): AppError {
+  return new AppError(403, 'VILLAGE_EDIT_FORBIDDEN', 'You can only edit villages that you created', [
+    { field: 'id', message: 'This village was created by someone else' },
+  ]);
+}
+
+function changeRequestRequired(status: VerificationStatus): AppError {
+  return new AppError(
+    403,
+    'CHANGE_REQUEST_REQUIRED',
+    `A ${status} village cannot be edited directly; submit the change as a change request`,
+    [{ field: 'verificationStatus', message: `The village is ${status}` }],
+  );
+}
+
+/**
+ * Who may edit a village directly (PATCH), checked after the village is loaded:
+ * - REVIEWER and ADMIN: always.
+ * - EDITOR: only a village they created that is still PENDING. A VERIFIED or REJECTED village, whoever created
+ *   it, has to be changed through a change request; a PENDING village of someone else is not theirs to edit.
+ */
+function assertCanEdit(village: Village, actor: WriteActor): void {
+  if (actor.role === Role.REVIEWER || actor.role === Role.ADMIN) return;
+
+  if (village.verificationStatus !== VerificationStatus.PENDING) {
+    throw changeRequestRequired(village.verificationStatus);
+  }
+  if (village.createdById !== actor.userId) throw villageEditForbidden();
+}
+
+// The unique constraints are the real guard against duplicates (a pre-check would race with a
+// concurrent insert), so a P2002 from the database is translated into a 409 for the right field.
+function uniqueViolation(err: unknown): AppError | null {
+  if (!(err instanceof Prisma.PrismaClientKnownRequestError) || err.code !== 'P2002') return null;
+
+  const target = String(err.meta?.target ?? '');
+  if (target.includes('slug')) {
+    return new AppError(409, 'SLUG_TAKEN', 'Another village already uses this slug', [
+      { field: 'slug', message: 'Slug is already taken' },
+    ]);
+  }
+  if (target.includes('pcbs')) {
+    return new AppError(409, 'PCBS_CODE_TAKEN', 'Another village already uses this PCBS code', [
+      { field: 'pcbsCode', message: 'PCBS code is already taken' },
+    ]);
+  }
+
+  return null;
+}
+
+/**
+ * Cross-field and cross-table rules for a create (current = null) or an update (current = stored row).
+ * On updates, fields missing from the body keep their stored value, so the rules apply to the final state.
+ */
+async function assertConsistent(
+  writes: VillageWriteRepository,
+  changes: VillageWriteData,
+  current: Village | null,
+): Promise<void> {
+  const governorateId = changes.governorateId ?? current?.governorateId;
+  const localAuthorityId =
+    changes.localAuthorityId !== undefined ? changes.localAuthorityId : (current?.localAuthorityId ?? null);
+  const nameOrigin = changes.nameOrigin !== undefined ? changes.nameOrigin : (current?.nameOrigin ?? null);
+  const nameOriginSourceId =
+    changes.nameOriginSourceId !== undefined ? changes.nameOriginSourceId : (current?.nameOriginSourceId ?? null);
+
+  // The governorate is a required foreign key; a clear 422 is more useful than a raw FK error.
+  if (changes.governorateId !== undefined && !(await writes.governorateExists(changes.governorateId))) {
+    throw unprocessable('GOVERNORATE_NOT_FOUND', 'governorateId', 'Governorate does not exist');
+  }
+
+  // A village's local authority must belong to the village's own governorate, or the two filters
+  // (?governorateId= and ?localAuthorityId=) would disagree about where the village is. Checked when
+  // either side changes, so moving a village to another governorate can't leave it under the old council.
+  if (localAuthorityId && (changes.localAuthorityId !== undefined || changes.governorateId !== undefined)) {
+    const authorityGovernorateId = await writes.findLocalAuthorityGovernorateId(localAuthorityId);
+    if (authorityGovernorateId === null) {
+      throw unprocessable('LOCAL_AUTHORITY_NOT_FOUND', 'localAuthorityId', 'Local authority does not exist');
+    }
+    if (authorityGovernorateId !== governorateId) {
+      throw unprocessable(
+        'LOCAL_AUTHORITY_GOVERNORATE_MISMATCH',
+        'localAuthorityId',
+        "Local authority does not belong to the village's governorate",
+      );
+    }
+  }
+
+  // "No fact without a source": a name origin is a historical claim, so it must cite where it comes from.
+  if (nameOrigin && !nameOriginSourceId) {
+    throw unprocessable('NAME_ORIGIN_REQUIRES_SOURCE', 'nameOriginSourceId', 'nameOrigin requires nameOriginSourceId');
+  }
+
+  // Only checked when the source is being set, so an unrelated edit isn't blocked by a source deleted later.
+  if (changes.nameOriginSourceId && !(await writes.sourceExists(changes.nameOriginSourceId))) {
+    throw unprocessable('SOURCE_NOT_FOUND', 'nameOriginSourceId', 'Source does not exist');
+  }
+}
+
 export class VillageService {
-  constructor(private readonly repository: VillageRepository = villageRepository) {}
+  constructor(
+    private readonly repository: VillageRepository = villageRepository,
+    private readonly audit: VillageAuditRecorder = villageAudit,
+  ) {}
 
   async list(query: ListVillagesQuery): Promise<VillageListResult> {
     const pagination = parsePagination(query);
@@ -143,6 +288,147 @@ export class VillageService {
   async ensureExists(villageId: string, client?: Prisma.TransactionClient): Promise<void> {
     if (!UUID_PATTERN.test(villageId) || !(await this.repository.exists(villageId, client))) {
       throw new NotFoundError('Village not found');
+    }
+  }
+
+  /** New villages start as PENDING at version 1 (database defaults). */
+  async create(input: CreateVillageInput, actor: WriteActor): Promise<VillageDetails> {
+    const id = await this.withUniqueChecks(() =>
+      this.repository.transaction(async (writes, tx) => {
+        await assertConsistent(writes, input, null);
+        const created = await writes.create({ ...input, createdById: actor.userId });
+        await this.recordAudit(tx, actor, AuditAction.CREATE, created.id, null, created);
+        return created.id;
+      }),
+    );
+
+    return this.getByIdOrSlug(id);
+  }
+
+  /** Any edit bumps version and sends the village back to PENDING for review. */
+  async update(id: string, input: UpdateVillageInput, actor: WriteActor): Promise<VillageDetails> {
+    const { version, ...changes } = input;
+
+    await this.withUniqueChecks(() =>
+      this.repository.transaction(async (writes, tx) => {
+        // 404, then 403, then 409: who may edit is decided before the version is compared.
+        const before = await this.loadForWrite(writes, id, version, (village) => assertCanEdit(village, actor));
+        await assertConsistent(writes, changes, before);
+        await this.applyVersioned(writes, tx, actor, AuditAction.UPDATE, before, version, {
+          ...changes,
+          verificationStatus: VerificationStatus.PENDING,
+        });
+      }),
+    );
+
+    return this.getByIdOrSlug(id);
+  }
+
+  /** Soft delete: the row stays for history but disappears from every read. */
+  async remove(id: string, actor: WriteActor): Promise<void> {
+    await this.repository.transaction(async (writes, tx) => {
+      const before = await writes.findById(id);
+      if (!before || before.deletedAt) throw villageNotFound();
+
+      // 0 means another request deleted it between the read and this write.
+      if ((await writes.softDelete(id, actor.userId)) === 0) throw villageNotFound();
+
+      const after = await writes.findById(id);
+      await this.recordAudit(tx, actor, AuditAction.DELETE, id, before, after);
+    });
+  }
+
+  verify(id: string, input: VillageVersionInput, actor: WriteActor): Promise<VillageDetails> {
+    return this.setVerificationStatus(id, input.version, VerificationStatus.VERIFIED, AuditAction.VERIFY, actor);
+  }
+
+  reject(id: string, input: VillageVersionInput, actor: WriteActor): Promise<VillageDetails> {
+    return this.setVerificationStatus(id, input.version, VerificationStatus.REJECTED, AuditAction.REJECT, actor);
+  }
+
+  // A status change is a change too: it bumps version, so an editor holding the old version gets a 409
+  // instead of silently editing a village that was just reviewed.
+  private async setVerificationStatus(
+    id: string,
+    version: number,
+    status: VerificationStatus,
+    action: AuditAction,
+    actor: WriteActor,
+  ): Promise<VillageDetails> {
+    await this.repository.transaction(async (writes, tx) => {
+      const before = await this.loadForWrite(writes, id, version);
+      await this.applyVersioned(writes, tx, actor, action, before, version, { verificationStatus: status });
+    });
+
+    return this.getByIdOrSlug(id);
+  }
+
+  /**
+   * Reads the row to change: 404 if missing or deleted, then `authorize` (403), then 409 if the client's
+   * version is already stale. Nothing has been written at any of these points.
+   */
+  private async loadForWrite(
+    writes: VillageWriteRepository,
+    id: string,
+    version: number,
+    authorize?: (village: Village) => void,
+  ): Promise<Village> {
+    const before = await writes.findById(id);
+    if (!before || before.deletedAt) throw villageNotFound();
+    authorize?.(before);
+    if (before.version !== version) throw versionConflict(before.version);
+
+    return before;
+  }
+
+  /**
+   * Optimistic locking: the update only matches { id, version, deletedAt: null }. If a concurrent request
+   * changed the row after loadForWrite, nothing matches, and a fresh read tells 404 (deleted) from 409.
+   */
+  private async applyVersioned(
+    writes: VillageWriteRepository,
+    tx: Prisma.TransactionClient,
+    actor: WriteActor,
+    action: AuditAction,
+    before: Village,
+    version: number,
+    changes: VillageChanges,
+  ): Promise<void> {
+    const changed = await writes.updateIfVersion(before.id, version, changes, actor.userId);
+    if (changed === 0) {
+      const current = await writes.findById(before.id);
+      if (!current || current.deletedAt) throw villageNotFound();
+      throw versionConflict(current.version);
+    }
+
+    const after = await writes.findById(before.id);
+    await this.recordAudit(tx, actor, action, before.id, before, after);
+  }
+
+  private recordAudit(
+    tx: Prisma.TransactionClient,
+    actor: WriteActor,
+    action: AuditAction,
+    entityId: string,
+    before: Village | null,
+    after: Village | null,
+  ): Promise<void> {
+    return this.audit.record(tx, {
+      entityType: AUDIT_ENTITY_TYPE,
+      entityId,
+      action,
+      actorId: actor.userId,
+      before,
+      after,
+      requestId: actor.requestId,
+    });
+  }
+
+  private async withUniqueChecks<T>(fn: () => Promise<T>): Promise<T> {
+    try {
+      return await fn();
+    } catch (err) {
+      throw uniqueViolation(err) ?? err;
     }
   }
 }
