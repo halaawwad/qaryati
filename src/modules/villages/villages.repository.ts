@@ -1,12 +1,14 @@
 import type {
   Governorate,
   LocalAuthority,
+  NearbyPlace as NearbyPlaceRecord,
   PlaceRelation,
   PlaceType,
   Source,
   VerificationStatus,
   Village,
   VillageName,
+  VillageNameType,
 } from '@prisma/client';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
@@ -98,11 +100,112 @@ export interface VillageListParams {
   take: number;
 }
 
+/** Columns a client may set on create/update. Server-owned columns are added by the service/repository. */
+export interface VillageWriteData {
+  slug?: string;
+  pcbsCode?: string | null;
+  nameAr?: string;
+  nameEn?: string | null;
+  governorateId?: string;
+  localAuthorityId?: string | null;
+  nameOrigin?: string | null;
+  nameOriginSourceId?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  elevationM?: number | null;
+  areaDunums?: number | null;
+  locationDescription?: string | null;
+  historicalOverview?: string | null;
+}
+
+export type VillageCreateData = VillageWriteData & {
+  slug: string;
+  nameAr: string;
+  governorateId: string;
+  createdById: string;
+};
+
+/**
+ * geoDisplayName and geoEnrichedAt are written only by VillageService.applyGeoEnrichment; request bodies
+ * can't carry them (the write schemas are strict objects).
+ */
+export type VillageChanges = VillageWriteData & {
+  verificationStatus: VerificationStatus;
+  geoDisplayName?: string | null;
+  geoEnrichedAt?: Date;
+};
+
+export interface VillageNameWriteData {
+  name?: string;
+  language?: string;
+  nameType?: VillageNameType;
+  periodFrom?: number | null;
+  periodTo?: number | null;
+  sourceId?: string | null;
+}
+
+export type VillageNameCreateData = VillageNameWriteData & {
+  villageId: string;
+  name: string;
+  language: string;
+  nameType: VillageNameType;
+  createdById: string;
+};
+
+export type VillageNameChanges = VillageNameWriteData & { verificationStatus: VerificationStatus };
+
+export interface NearbyPlaceCreateData {
+  villageId: string;
+  relatedVillageId: string | null;
+  placeName: string;
+  placeType: PlaceType;
+  relation: PlaceRelation;
+  distanceKm: number | null;
+}
+
+/** Write-side queries, always bound to one transaction. */
+export interface VillageWriteRepository {
+  /** The full row, including soft-deleted ones; used for checks and as the audit snapshot. */
+  findById(id: string): Promise<Village | null>;
+  governorateExists(id: string): Promise<boolean>;
+  /** The local authority's governorate id, or null when the local authority does not exist. */
+  findLocalAuthorityGovernorateId(id: string): Promise<string | null>;
+  /** True for a source that exists and is not soft-deleted. */
+  sourceExists(id: string): Promise<boolean>;
+  create(data: VillageCreateData): Promise<Village>;
+  /**
+   * Applies the changes only while the row is still at expectedVersion and not deleted, bumping
+   * version and setting updatedById (null for system jobs). Returns the number of rows changed (0 or 1).
+   */
+  updateIfVersion(id: string, expectedVersion: number, changes: VillageChanges, updatedById: string | null): Promise<number>;
+  /** Sets deletedAt unless the row is already deleted. Returns the number of rows changed (0 or 1). */
+  softDelete(id: string, updatedById: string): Promise<number>;
+
+  /** The full village_names row, including soft-deleted ones. */
+  findNameById(id: string): Promise<VillageName | null>;
+  /** True when the village already has a non-deleted name with this text and language (case-insensitive). */
+  nameTaken(villageId: string, name: string, language: string, exceptId?: string): Promise<boolean>;
+  createName(data: VillageNameCreateData): Promise<VillageName>;
+  /** Same contract as updateIfVersion, for village_names. */
+  updateNameIfVersion(id: string, expectedVersion: number, changes: VillageNameChanges, updatedById: string): Promise<number>;
+  softDeleteName(id: string, updatedById: string): Promise<number>;
+
+  findNearbyById(id: string): Promise<NearbyPlaceRecord | null>;
+  /** A relation between the two villages stored in either direction, or null. */
+  findRelationBetween(villageId: string, otherVillageId: string): Promise<NearbyPlaceRecord | null>;
+  placeNameTaken(villageId: string, placeName: string): Promise<boolean>;
+  createNearby(data: NearbyPlaceCreateData): Promise<NearbyPlaceRecord>;
+  /** Hard delete. Returns the number of rows removed (0 or 1). */
+  deleteNearby(id: string): Promise<number>;
+}
+
 export interface VillageRepository {
+  /** Runs fn in one database transaction; tx is passed along so audit rows commit with the change. */
+  transaction<T>(fn: (writes: VillageWriteRepository, tx: Prisma.TransactionClient) => Promise<T>): Promise<T>;
   findMany(params: VillageListParams): Promise<{ items: VillageListItem[]; total: number }>;
   /** Returns null when the village does not exist or is soft-deleted. */
   findDetails(lookup: VillageLookup): Promise<VillageDetails | null>;
-  
+
   /** True only for an active village; a supplied transaction holds a shared row lock. */
   exists(id: string, client?: Prisma.TransactionClient): Promise<boolean>;
 
@@ -277,7 +380,130 @@ function buildOrderBy({ field, order }: VillageListParams['sort']): Prisma.Villa
   return [primary, { id: 'asc' }];
 }
 
+function buildWriteRepository(tx: Prisma.TransactionClient): VillageWriteRepository {
+  return {
+    findById(id) {
+      return tx.village.findUnique({ where: { id } });
+    },
+
+    async governorateExists(id) {
+      const row = await tx.governorate.findUnique({ where: { id }, select: { id: true } });
+      return row !== null;
+    },
+
+    async findLocalAuthorityGovernorateId(id) {
+      const row = await tx.localAuthority.findUnique({ where: { id }, select: { governorateId: true } });
+      return row?.governorateId ?? null;
+    },
+
+    async sourceExists(id) {
+      const row = await tx.source.findFirst({ where: { id, deletedAt: null }, select: { id: true } });
+      return row !== null;
+    },
+
+    create(data) {
+      return tx.village.create({ data });
+    },
+
+    async updateIfVersion(id, expectedVersion, changes, updatedById) {
+      const result = await tx.village.updateMany({
+        where: { id, version: expectedVersion, deletedAt: null },
+        data: { ...changes, updatedById, version: { increment: 1 } },
+      });
+
+      return result.count;
+    },
+
+    async softDelete(id, updatedById) {
+      const result = await tx.village.updateMany({
+        where: { id, deletedAt: null },
+        data: { deletedAt: new Date(), updatedById },
+      });
+
+      return result.count;
+    },
+
+    findNameById(id) {
+      return tx.villageName.findUnique({ where: { id } });
+    },
+
+    async nameTaken(villageId, name, language, exceptId) {
+      const row = await tx.villageName.findFirst({
+        where: {
+          villageId,
+          language,
+          deletedAt: null,
+          name: { equals: name, mode: 'insensitive' },
+          ...(exceptId ? { id: { not: exceptId } } : {}),
+        },
+        select: { id: true },
+      });
+
+      return row !== null;
+    },
+
+    createName(data) {
+      return tx.villageName.create({ data });
+    },
+
+    async updateNameIfVersion(id, expectedVersion, changes, updatedById) {
+      const result = await tx.villageName.updateMany({
+        where: { id, version: expectedVersion, deletedAt: null },
+        data: { ...changes, updatedById, version: { increment: 1 } },
+      });
+
+      return result.count;
+    },
+
+    async softDeleteName(id, updatedById) {
+      const result = await tx.villageName.updateMany({
+        where: { id, deletedAt: null },
+        data: { deletedAt: new Date(), updatedById },
+      });
+
+      return result.count;
+    },
+
+    findNearbyById(id) {
+      return tx.nearbyPlace.findUnique({ where: { id } });
+    },
+
+    findRelationBetween(villageId, otherVillageId) {
+      return tx.nearbyPlace.findFirst({
+        where: {
+          OR: [
+            { villageId, relatedVillageId: otherVillageId },
+            { villageId: otherVillageId, relatedVillageId: villageId },
+          ],
+        },
+      });
+    },
+
+    async placeNameTaken(villageId, placeName) {
+      const row = await tx.nearbyPlace.findUnique({
+        where: { villageId_placeName: { villageId, placeName } },
+        select: { id: true },
+      });
+
+      return row !== null;
+    },
+
+    createNearby(data) {
+      return tx.nearbyPlace.create({ data });
+    },
+
+    async deleteNearby(id) {
+      const result = await tx.nearbyPlace.deleteMany({ where: { id } });
+      return result.count;
+    },
+  };
+}
+
 export const villageRepository: VillageRepository = {
+  transaction(fn) {
+    return prisma.$transaction((tx) => fn(buildWriteRepository(tx), tx));
+  },
+
   async findMany(params) {
     if (params.filters.search) {
       const { ids, total } = await findIdsBySearch(params);
