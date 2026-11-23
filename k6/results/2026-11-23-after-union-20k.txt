@@ -1,0 +1,30 @@
+k6 village search: after-union
+  target:   http://app:3000/api/v1/villages
+  load:     20 VUs, 60s (constant-vus)
+  dataset:  20014 villages, 26068 village_names, trgm indexes: 4; 20000 perf- seed=1 + 14 real; code=perf/k6-village-search@bfebc3a (UNION query in a tagged $queryRaw) + pg_trgm indexes created by the migration at app start-up
+
+overall
+  requests:    6548
+  throughput:  108.74 req/s
+  avg:         182.5 ms
+  p95:         334.7 ms
+  p99:         562.6 ms
+  max:         794.9 ms
+  error rate:  0.00 %
+  checks ok:   100.00 %
+
+per request kind
+  kind                 requests         avg         p95         max    errors
+  search                  2302    222.5 ms    504.7 ms    794.9 ms    0.00 %
+  search_alt_name          988    224.2 ms    309.1 ms    449.8 ms    0.00 %
+  search_no_match          652     79.8 ms    127.3 ms    199.1 ms    0.00 %
+  governorate              997     89.9 ms    143.1 ms    206.3 ms    0.00 %
+  page                     941    226.0 ms    331.5 ms    488.1 ms    0.00 %
+  governorate_search       668    160.0 ms    294.9 ms    515.4 ms    0.00 %
+conditions (same procedure and the same quiet-machine gate for all three measurements):
+  in the 30 s before the warm-up: average CPU 9 %, lowest free RAM 794 MB
+  chrome processes: 0
+  ChatGPT processes (windowless, background): 0
+  edge processes (windowless, background): 0
+  3uAirPlayer processes: 1
+  procedure: app recreated, ANALYZE, totals check, quiet-machine gate, 15s warm-up (discarded), then 60s measured
