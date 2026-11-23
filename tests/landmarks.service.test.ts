@@ -29,6 +29,8 @@ function landmark(status: VerificationStatus = VerificationStatus.PENDING): Land
 }
 
 class FakeLandmarkRepository implements LandmarkRepository {
+  create = vi.fn<LandmarkRepository['create']>();
+  transaction = vi.fn<LandmarkRepository['transaction']>();
   listResult: { items: LandmarkDetails[]; total: number } | null = { items: [], total: 0 };
   detail: LandmarkDetails | null = null;
   lastParams: LandmarkListParams | undefined;

@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { userRepository } from '../src/modules/users/users.repository.js';
 
+const audit = vi.hoisted(() => ({ recordAudit: vi.fn() }));
+vi.mock('../src/modules/audit/audit.service.js', () => audit);
+
 const db = vi.hoisted(() => ({
   user: { findUnique: vi.fn(), findMany: vi.fn(), count: vi.fn(), update: vi.fn() },
   refreshToken: { updateMany: vi.fn() },
@@ -31,12 +34,17 @@ describe('userRepository', () => {
     expect(result).toEqual({ items: [], total: 0 });
   });
 
-  it('runs reads, active admin count, update and token revocation on the Serializable transaction client', async () => {
+  it('runs reads, active admin count, update, token revocation and audit on the Serializable transaction client', async () => {
+    const auditInput = {
+      entityType: 'User', entityId: 'target', action: 'UPDATE', actorId: 'admin', requestId: 'req-1',
+      before: { isActive: true }, after: { isActive: false },
+    } as const;
     await userRepository.transaction(async (tx) => {
       await tx.findById('target');
       await tx.countActiveAdmins();
       await tx.update('target', { isActive: false });
       await tx.revokeRefreshTokens('target');
+      await tx.recordAudit(auditInput);
     });
     expect(db.transaction).toHaveBeenCalledWith(expect.any(Function), { isolationLevel: 'Serializable' });
     expect(db.user.findUnique).toHaveBeenCalledWith({ where: { id: 'target' }, select });
@@ -45,5 +53,15 @@ describe('userRepository', () => {
     expect(db.refreshToken.updateMany).toHaveBeenCalledWith({
       where: { userId: 'target', revokedAt: null }, data: { revokedAt: expect.any(Date) },
     });
+    expect(audit.recordAudit).toHaveBeenCalledWith(auditInput, db);
+  });
+
+  it('propagates audit write failures out of the transaction', async () => {
+    const failure = new Error('audit insert failed');
+    audit.recordAudit.mockRejectedValue(failure);
+    await expect(userRepository.transaction(async (tx) => {
+      await tx.update('target', { role: 'REVIEWER' });
+      await tx.recordAudit({ entityType: 'User', entityId: 'target', action: 'UPDATE' });
+    })).rejects.toBe(failure);
   });
 });
