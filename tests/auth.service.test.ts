@@ -162,6 +162,21 @@ describe('AuthService login', () => {
     await expect(wrongPassword).resolves.toMatchObject(await unknownEmail);
   });
 
+  it('runs a bcrypt comparison for an unknown email so response time does not reveal registered emails', async () => {
+    const compare = vi.spyOn(bcrypt, 'compare');
+    try {
+      await expect(new Service(repo).login({ email: 'unknown@example.test', password: 'whatever' }))
+        .rejects.toMatchObject({ statusCode: 401, code: 'INVALID_CREDENTIALS' });
+
+      expect(compare).toHaveBeenCalledOnce();
+      const [password, hash] = compare.mock.calls[0] ?? [];
+      expect(password).toBe('whatever');
+      expect(bcrypt.getRounds(hash as string)).toBe(12);
+    } finally {
+      compare.mockRestore();
+    }
+  });
+
   it('rejects inactive users', async () => {
     const user = repo.users.get('user@example.test');
     if (!user) throw new Error('Missing fake user');

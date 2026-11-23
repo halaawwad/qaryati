@@ -46,6 +46,33 @@ describe('authenticate', () => {
 
     expect(next).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 401, code: 'UNAUTHORIZED' }));
   });
+
+  it('accepts a valid HS256 token', () => {
+    const token = jwt.sign({ role: Role.EDITOR }, 'test-secret-with-at-least-32-characters', {
+      subject: 'user-1',
+      expiresIn: '15m',
+      algorithm: 'HS256',
+    });
+    const { req, res, next } = middlewareArgs(`Bearer ${token}`);
+
+    authenticate(req, res, next);
+
+    expect(next).toHaveBeenCalledWith();
+    expect(req.user).toEqual({ id: 'user-1', role: Role.EDITOR });
+  });
+
+  it.each(['HS384', 'HS512'] as const)('rejects a token signed with %s even with the right secret', (algorithm) => {
+    const token = jwt.sign({ role: Role.ADMIN }, 'test-secret-with-at-least-32-characters', {
+      subject: 'user-1',
+      expiresIn: '15m',
+      algorithm,
+    });
+    const { req, res, next } = middlewareArgs(`Bearer ${token}`);
+
+    authenticate(req, res, next);
+
+    expect(next).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 401, code: 'UNAUTHORIZED' }));
+  });
 });
 
 describe('requireRole', () => {
