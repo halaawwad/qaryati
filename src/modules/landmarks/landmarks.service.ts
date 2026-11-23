@@ -1,7 +1,11 @@
+import { AuditAction } from '@prisma/client';
 import { NotFoundError } from '../../shared/errors.js';
 import { buildPaginationMeta, parsePagination, type PaginationMeta } from '../../shared/pagination.js';
-import { landmarkRepository, type LandmarkDetails, type LandmarkRepository } from './landmarks.repository.js';
-import type { ListLandmarksQuery } from './landmarks.schemas.js';
+import { sourceService } from '../sources/sources.service.js';
+import { recordAudit } from '../audit/audit.service.js';
+import { villageService } from '../villages/villages.service.js';
+import { landmarkRepository, type LandmarkCreateContext, type LandmarkDetails, type LandmarkRepository } from './landmarks.repository.js';
+import type { CreateLandmarkInput, ListLandmarksQuery } from './landmarks.schemas.js';
 
 export interface LandmarkListResult {
   items: LandmarkDetails[];
@@ -10,6 +14,30 @@ export interface LandmarkListResult {
 
 export class LandmarkService {
   constructor(private readonly repository: LandmarkRepository = landmarkRepository) {}
+
+  async create(villageId: string, input: CreateLandmarkInput, context: LandmarkCreateContext): Promise<LandmarkDetails> {
+    await villageService.ensureExists(villageId);
+    // Sources owns reference visibility: any active source is usable, regardless of status.
+    await sourceService.getById(input.sourceId);
+    return this.repository.transaction(async (client) => {
+      // Recheck and lock in a fixed order. Early checks alone cannot protect against deletion.
+      await villageService.ensureExists(villageId, client);
+      await sourceService.getById(input.sourceId, client);
+      const landmark = await this.repository.create(villageId, input, context, client);
+      await recordAudit({
+        entityType: 'Landmark', entityId: landmark.id, action: AuditAction.CREATE,
+        actorId: context.actorId, requestId: context.requestId,
+        after: {
+          id: landmark.id, villageId: landmark.villageId,
+          nameAr: landmark.nameAr, nameEn: landmark.nameEn,
+          landmarkType: landmark.landmarkType, description: landmark.description,
+          latitude: landmark.latitude, longitude: landmark.longitude, sourceId: landmark.sourceId,
+          verificationStatus: landmark.verificationStatus, version: landmark.version,
+        },
+      }, client);
+      return landmark;
+    });
+  }
 
   async list(villageId: string, query: ListLandmarksQuery): Promise<LandmarkListResult> {
     const pagination = parsePagination(query);

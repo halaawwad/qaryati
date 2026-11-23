@@ -18,13 +18,15 @@ export const getById: RequestHandler = async (req, res, next) => {
 export const updateRole: RequestHandler = async (req, res, next) => {
   try {
     const { role } = req.body as { role: UserRole };
-    res.status(200).json({ data: await userService.updateRole(req.user.id, req.params.id as string, role) });
+    const context = { actorId: req.user.id, requestId: req.requestId };
+    res.status(200).json({ data: await userService.updateRole(context, req.params.id as string, role) });
   } catch (err) { next(err); }
 };
 
 export const updateStatus: RequestHandler = async (req, res, next) => {
   try {
     const { isActive } = req.body as { isActive: boolean };
-    res.status(200).json({ data: await userService.updateStatus(req.user.id, req.params.id as string, isActive) });
+    const context = { actorId: req.user.id, requestId: req.requestId };
+    res.status(200).json({ data: await userService.updateStatus(context, req.params.id as string, isActive) });
   } catch (err) { next(err); }
 };

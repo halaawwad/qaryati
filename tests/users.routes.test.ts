@@ -75,11 +75,13 @@ describe('admin user routes', () => {
     expect(service.list).toHaveBeenCalledWith({ page: 2, limit: 5, role: 'REVIEWER', isActive: false, q: 'User', sort: 'fullName', order: 'asc' });
   });
 
-  it('forwards the authenticated actor to both updates', async () => {
-    await request(app).patch(`/api/v1/users/${id}/role`).set('Authorization', `Bearer ${token()}`).send({ role: 'REVIEWER' });
-    await request(app).patch(`/api/v1/users/${id}/status`).set('Authorization', `Bearer ${token()}`).send({ isActive: false });
-    expect(service.updateRole).toHaveBeenCalledWith(actorId, id, 'REVIEWER');
-    expect(service.updateStatus).toHaveBeenCalledWith(actorId, id, false);
+  it('forwards the authenticated actor and request id to both updates', async () => {
+    await request(app).patch(`/api/v1/users/${id}/role`).set('Authorization', `Bearer ${token()}`)
+      .set('X-Request-Id', 'req-role').send({ role: 'REVIEWER' });
+    await request(app).patch(`/api/v1/users/${id}/status`).set('Authorization', `Bearer ${token()}`)
+      .set('X-Request-Id', 'req-status').send({ isActive: false });
+    expect(service.updateRole).toHaveBeenCalledWith({ actorId, requestId: 'req-role' }, id, 'REVIEWER');
+    expect(service.updateStatus).toHaveBeenCalledWith({ actorId, requestId: 'req-status' }, id, false);
   });
 
   it.each([
