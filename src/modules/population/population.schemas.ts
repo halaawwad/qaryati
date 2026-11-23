@@ -18,7 +18,7 @@ export const updatePopulationSchema = z.strictObject({
  referenceYear: createPopulationSchema.shape.referenceYear.optional(),
  referenceDate: createPopulationSchema.shape.referenceDate,
  sourceId: createPopulationSchema.shape.sourceId.optional(),
- isEstimate: z.boolean().optional(), needsReview: z.boolean().optional(),
+ isEstimate: z.boolean().optional(),
  notes: createPopulationSchema.shape.notes,
 }).refine(({expectedVersion: _version, ...changes}) => Object.values(changes).some(value => value !== undefined), {message: 'At least one editable field is required'});
 export type UpdatePopulationInput = z.infer<typeof updatePopulationSchema>;

@@ -8,7 +8,7 @@ export interface PopulationListParams {
  villageId: string; filters: { referenceYear?: number; sourceId?: string; isEstimate?: boolean; isPreferred?: boolean; needsReview?: boolean; verificationStatus?: VerificationStatus };
  sort: { field: 'referenceYear' | 'population' | 'createdAt' | 'updatedAt'; order: 'asc' | 'desc' }; skip: number; take: number;
 }
-export interface PopulationRepository { transaction<T>(fn: (client: Prisma.TransactionClient) => Promise<T>): Promise<T>; findLatestVerified(villageId: string, client: Prisma.TransactionClient): Promise<{population: number} | null>; create(villageId: string, input: CreatePopulationInput, needsReview: boolean, context: PopulationCreateContext, client: Prisma.TransactionClient): Promise<PopulationDetails>; findForUpdate(id: string, client: Prisma.TransactionClient): Promise<(PopulationDetails & {createdById: string | null}) | null>; update(id: string, input: UpdatePopulationInput, actorId: string, client: Prisma.TransactionClient): Promise<PopulationDetails>; findMany(params: PopulationListParams): Promise<{ items: PopulationDetails[]; total: number }>; findById(id: string): Promise<PopulationDetails | null> }
+export interface PopulationRepository { transaction<T>(fn: (client: Prisma.TransactionClient) => Promise<T>): Promise<T>; findLatestVerified(villageId: string, client: Prisma.TransactionClient, excludeId?: string): Promise<{population: number} | null>; create(villageId: string, input: CreatePopulationInput, needsReview: boolean, context: PopulationCreateContext, client: Prisma.TransactionClient): Promise<PopulationDetails>; findForUpdate(id: string, client: Prisma.TransactionClient): Promise<(PopulationDetails & {createdById: string | null}) | null>; update(id: string, input: UpdatePopulationInput, actorId: string, client: Prisma.TransactionClient, needsReview?: boolean): Promise<PopulationDetails>; findMany(params: PopulationListParams): Promise<{ items: PopulationDetails[]; total: number }>; findById(id: string): Promise<PopulationDetails | null> }
 const select = { id: true, villageId: true, population: true, referenceYear: true, referenceDate: true, sourceId: true, isEstimate: true, isPreferred: true, needsReview: true, notes: true, verificationStatus: true, version: true, createdAt: true, updatedAt: true } satisfies Prisma.PopulationRecordSelect;
 const active = { deletedAt: null, village: { deletedAt: null } } satisfies Prisma.PopulationRecordWhereInput;
 function isPopulationBusinessKeyConflict(error: unknown): boolean {
@@ -33,18 +33,18 @@ export const populationRepository: PopulationRepository = {
   if (!rows.length) return null;
   return client.populationRecord.findFirst({where: {id, deletedAt: null}, select: {...select, createdById: true}});
  },
- async update(id, input, actorId, client) {
-  const {expectedVersion, referenceDate, ...changes} = input;
+ async update(id, input, actorId, client, needsReview) {
+  const {expectedVersion, referenceDate, population, referenceYear, sourceId, isEstimate, notes} = input;
   try {
-   return await client.populationRecord.update({where: {id, deletedAt: null, version: expectedVersion}, data: {...changes, ...(referenceDate !== undefined ? {referenceDate: referenceDate === null ? null : new Date(referenceDate)} : {}), updatedById: actorId, version: {increment: 1}}, select});
+   return await client.populationRecord.update({where: {id, deletedAt: null, version: expectedVersion}, data: {population, referenceYear, sourceId, isEstimate, notes, ...(needsReview !== undefined ? {needsReview} : {}), ...(referenceDate !== undefined ? {referenceDate: referenceDate === null ? null : new Date(referenceDate)} : {}), updatedById: actorId, version: {increment: 1}}, select});
   } catch (error) {
    if (isPopulationBusinessKeyConflict(error) || isPreferredIndexConflict(error)) throw new ConflictError('Population record conflicts with an existing record');
    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') throw new ConflictError('Population record changed during update');
    throw error;
   }
  },
- findLatestVerified(villageId, client) {
-  return client.populationRecord.findFirst({where: {villageId, verificationStatus: 'VERIFIED', deletedAt: null}, orderBy: [{referenceYear: 'desc'}, {id: 'asc'}], select: {population: true}});
+ findLatestVerified(villageId, client, excludeId) {
+  return client.populationRecord.findFirst({where: {villageId, verificationStatus: 'VERIFIED', deletedAt: null, ...(excludeId !== undefined ? {id: {not: excludeId}} : {})}, orderBy: [{referenceYear: 'desc'}, {id: 'asc'}], select: {population: true}});
  },
  async create(villageId, input, needsReview, context, client) {
   try {

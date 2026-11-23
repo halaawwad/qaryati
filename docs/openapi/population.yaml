@@ -124,7 +124,11 @@ paths:
         REJECTED records are provisionally prohibited. An unchanged deleted source may be retained; a replacement source
         must be active. Matching no-ops do not increment version or create an audit.
         Other changes and their audit are atomic. Conflicts include stale versions,
-        concurrent changes, and positively identified uniqueness conflicts.
+        concurrent changes, and positively identified uniqueness conflicts. Provisionally,
+        changing population compares it with the latest other non-deleted VERIFIED record
+        for the village using the CREATE threshold; a flag once set remains set. With no
+        baseline no new flag is raised; an invalid baseline raises it. Year-only and
+        other edits preserve the flag. Clients cannot set needsReview through PATCH.
       security:
         - bearerAuth: []
       parameters:
@@ -194,7 +198,6 @@ components:
         sourceId: { type: string, format: uuid }
         referenceDate: { type: string, format: date-time, nullable: true }
         isEstimate: { type: boolean }
-        needsReview: { type: boolean }
         notes: { type: string, maxLength: 5000, nullable: true, description: Trimmed before length validation. }
     CreatePopulationRecord:
       type: object

@@ -9,6 +9,9 @@ import type { CreatePopulationInput, ListPopulationQuery, UpdatePopulationInput 
 function snapshot(item: import('./population.repository.js').PopulationDetails) {
  return {id:item.id, villageId:item.villageId, population:item.population, referenceYear:item.referenceYear, referenceDate:item.referenceDate?.toISOString() ?? null, sourceId:item.sourceId, isEstimate:item.isEstimate, isPreferred:item.isPreferred, needsReview:item.needsReview, notes:item.notes, verificationStatus:item.verificationStatus, version:item.version};
 }
+function anomalous(population: number, baseline: {population: number} | null): boolean {
+ return baseline !== null && (!Number.isSafeInteger(baseline.population) || baseline.population <= 0 || Math.abs(population - baseline.population) * 2 > baseline.population);
+}
 export class PopulationService {
  constructor(private readonly repository: PopulationRepository = populationRepository, private readonly villages: Pick<typeof villageService, 'ensureExists'> = villageService) {}
  async update(id: string, input: UpdatePopulationInput, context: PopulationCreateContext & {role: Role}) {
@@ -30,7 +33,12 @@ export class PopulationService {
     return value !== before[key as keyof typeof before];
    });
    if (!changed) return before;
-   const item = await this.repository.update(id, input, context.actorId, client);
+   let needsReview: boolean | undefined;
+   if (input.population !== undefined && input.population !== current.population) {
+    const baseline = await this.repository.findLatestVerified(current.villageId, client, id);
+    needsReview = current.needsReview || anomalous(input.population, baseline);
+   }
+   const item = await this.repository.update(id, input, context.actorId, client, needsReview);
    await recordAudit({entityType:'PopulationRecord', entityId:id, action:'UPDATE', actorId:context.actorId, requestId:context.requestId, before:snapshot(before), after:snapshot(item)}, client);
    return item;
   });
@@ -42,7 +50,7 @@ export class PopulationService {
    await this.villages.ensureExists(villageId, client);
    await sourceService.getById(input.sourceId, client);
    const baseline = await this.repository.findLatestVerified(villageId, client);
-   const needsReview = baseline !== null && (!Number.isSafeInteger(baseline.population) || baseline.population <= 0 || Math.abs(input.population - baseline.population) * 2 > baseline.population);
+   const needsReview = anomalous(input.population, baseline);
    const item = await this.repository.create(villageId, input, needsReview, context, client);
    await recordAudit({ entityType: 'PopulationRecord', entityId: item.id, action: 'CREATE', actorId: context.actorId, requestId: context.requestId, before: null,
     after: { id: item.id, villageId: item.villageId, population: item.population, referenceYear: item.referenceYear, referenceDate: item.referenceDate?.toISOString() ?? null, sourceId: item.sourceId, isEstimate: item.isEstimate, isPreferred: item.isPreferred, needsReview: item.needsReview, notes: item.notes, verificationStatus: item.verificationStatus, version: item.version },
