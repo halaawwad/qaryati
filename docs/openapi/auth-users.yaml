@@ -1,0 +1,488 @@
+openapi: 3.0.3
+info:
+  title: Qaryati API - Authentication and User Management
+  version: 1.0.0
+  description: |
+    Authentication, user management and health endpoints of the Qaryati API.
+
+    ## Authentication flow
+    1. `POST /auth/register` creates an account. New accounts always get the `EDITOR` role.
+    2. `POST /auth/login` returns a short-lived JWT **access token** (15 minutes by default)
+       and an opaque **refresh token** (7 days by default).
+    3. Send the access token on protected requests: `Authorization: Bearer <accessToken>`.
+    4. When the access token expires, call `POST /auth/refresh` with the refresh token to get
+       a new pair. The old refresh token is revoked (rotation).
+    5. Re-using an already rotated refresh token is treated as theft: all of the user's
+       refresh tokens are revoked and the request returns 401.
+    6. `POST /auth/logout` revokes the refresh token.
+
+    ## Roles
+    `EDITOR` (default), `REVIEWER`, `ADMIN`. User management endpoints are `ADMIN` only.
+
+    ## Errors
+    Every error uses the same envelope (`ErrorResponse`) with a machine-readable `code`
+    and the request's `requestId` (also returned in the `X-Request-Id` header).
+
+    ## Rate limiting
+    Requests over a limit return 429 `TOO_MANY_REQUESTS` with `Retry-After`.
+    Defaults: 300 requests / 15 min per IP on `/api/v1` (except `/health`),
+    5 failed logins / 15 min per IP + email, 10 registrations / hour per IP,
+    30 refreshes / 15 min per IP.
+servers:
+  - url: http://localhost:3000/api/v1
+    description: Local Docker (docker compose up)
+tags:
+  - name: Health
+  - name: Auth
+    description: Registration, login, token refresh, logout and the current user.
+  - name: Users
+    description: User management (ADMIN only).
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      description: Checks PostgreSQL and Redis. Never rate limited.
+      security: []
+      responses:
+        '200':
+          description: Database and Redis are up.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Health' }
+              example: { status: ok, db: up, redis: up }
+        '503':
+          description: Database or Redis is down.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Health' }
+              example: { status: error, db: up, redis: down }
+
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Register a new account
+      description: Creates a user with the `EDITOR` role. The role is never taken from the request.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterRequest' }
+            example: { email: hala@example.com, password: strongpass123, fullName: Hala Example }
+      responses:
+        '201':
+          description: Account created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user]
+                properties:
+                  user: { $ref: '#/components/schemas/PublicUser' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '409':
+          description: Email already registered (`EMAIL_TAKEN`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              example:
+                error: { code: EMAIL_TAKEN, message: Email is already registered, details: [], requestId: 9b8c-example }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Log in
+      description: |
+        Returns an access token, a refresh token and the user.
+        Wrong password and unknown email return the same 401 response.
+        Only failed attempts count toward the login rate limit.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+            example: { email: hala@example.com, password: strongpass123 }
+      responses:
+        '200':
+          description: Logged in.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthResult' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401':
+          description: Invalid email or password (`INVALID_CREDENTIALS`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              example:
+                error: { code: INVALID_CREDENTIALS, message: Invalid email or password, details: [], requestId: a4f1-example }
+        '403':
+          description: The account is deactivated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Refresh tokens (rotation)
+      description: |
+        Revokes the presented refresh token and returns a new pair.
+        Using a token that was already rotated revokes all of the user's refresh tokens (reuse detection).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RefreshRequest' }
+      responses:
+        '200':
+          description: New token pair.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthTokens' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401':
+          description: Unknown, expired, revoked or reused refresh token.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '403':
+          description: The account is deactivated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Log out
+      description: Revokes the refresh token. Returns 204 even for an unknown token.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RefreshRequest' }
+      responses:
+        '204': { description: Logged out (no content). }
+        '400': { $ref: '#/components/responses/ValidationError' }
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Current user
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: The authenticated user.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user]
+                properties:
+                  user: { $ref: '#/components/schemas/PublicUser' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /users:
+    get:
+      tags: [Users]
+      summary: List users
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: limit, in: query, description: "Page size, capped at 100.", schema: { type: integer, minimum: 1, default: 20, maximum: 100 } }
+        - { name: role, in: query, schema: { $ref: '#/components/schemas/Role' } }
+        - { name: isActive, in: query, schema: { type: string, enum: ['true', 'false'] } }
+        - { name: q, in: query, description: Case-insensitive search in email or full name (max 100 chars)., schema: { type: string, maxLength: 100 } }
+        - { name: sort, in: query, schema: { type: string, enum: [createdAt, email, fullName], default: createdAt } }
+        - { name: order, in: query, schema: { type: string, enum: [asc, desc], default: desc } }
+      responses:
+        '200':
+          description: A page of users.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/User' }
+                  meta: { $ref: '#/components/schemas/PaginationMeta' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /users/{id}:
+    get:
+      tags: [Users]
+      summary: Get a user
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      responses:
+        '200':
+          description: The user.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/User' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/UserNotFound' }
+
+  /users/{id}/role:
+    patch:
+      tags: [Users]
+      summary: Change a user's role
+      description: |
+        - An admin cannot change their own role (409 `CANNOT_MODIFY_SELF`); setting it to the same value returns 200.
+        - At least one active admin must remain (409 `LAST_ADMIN`).
+        - The new role applies at the user's next refresh or login.
+        - Every actual change is written to the audit log.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role: { $ref: '#/components/schemas/Role' }
+            example: { role: REVIEWER }
+      responses:
+        '200':
+          description: Updated user.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/User' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/UserNotFound' }
+        '409': { $ref: '#/components/responses/UserConflict' }
+
+  /users/{id}/status:
+    patch:
+      tags: [Users]
+      summary: Activate or deactivate a user
+      description: |
+        - Deactivation revokes all of the user's refresh tokens; their current access token stays valid until it expires.
+        - An admin cannot deactivate themselves (409 `CANNOT_MODIFY_SELF`).
+        - At least one active admin must remain (409 `LAST_ADMIN`).
+        - Every actual change is written to the audit log.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [isActive]
+              properties:
+                isActive: { type: boolean }
+            example: { isActive: false }
+      responses:
+        '200':
+          description: Updated user.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/User' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/UserNotFound' }
+        '409': { $ref: '#/components/responses/UserConflict' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Access token from /auth/login or /auth/refresh.
+
+  parameters:
+    UserId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+
+  schemas:
+    Role:
+      type: string
+      enum: [ADMIN, REVIEWER, EDITOR]
+
+    PublicUser:
+      type: object
+      required: [id, email, fullName, role]
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        fullName: { type: string }
+        role: { $ref: '#/components/schemas/Role' }
+
+    User:
+      type: object
+      description: Never contains the password hash or any token.
+      required: [id, email, fullName, role, isActive, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        fullName: { type: string }
+        role: { $ref: '#/components/schemas/Role' }
+        isActive: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    RegisterRequest:
+      type: object
+      required: [email, password, fullName]
+      properties:
+        email: { type: string, format: email, description: Trimmed and lowercased before saving. }
+        password: { type: string, minLength: 8 }
+        fullName: { type: string, minLength: 1 }
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, minLength: 1 }
+
+    RefreshRequest:
+      type: object
+      required: [refreshToken]
+      properties:
+        refreshToken: { type: string, minLength: 1 }
+
+    AuthTokens:
+      type: object
+      required: [accessToken, refreshToken]
+      properties:
+        accessToken: { type: string, description: "JWT, valid 15 minutes by default." }
+        refreshToken: { type: string, description: "Opaque token, valid 7 days by default." }
+
+    AuthResult:
+      allOf:
+        - $ref: '#/components/schemas/AuthTokens'
+        - type: object
+          required: [user]
+          properties:
+            user: { $ref: '#/components/schemas/PublicUser' }
+
+    PaginationMeta:
+      type: object
+      required: [page, limit, total, totalPages, hasNextPage, hasPrevPage]
+      properties:
+        page: { type: integer }
+        limit: { type: integer }
+        total: { type: integer }
+        totalPages: { type: integer }
+        hasNextPage: { type: boolean }
+        hasPrevPage: { type: boolean }
+
+    Health:
+      type: object
+      required: [status, db, redis]
+      properties:
+        status: { type: string, enum: [ok, error] }
+        db: { type: string, enum: [up, down] }
+        redis: { type: string, enum: [up, down] }
+
+    ErrorDetail:
+      type: object
+      required: [field, message]
+      properties:
+        field: { type: string }
+        message: { type: string }
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, details, requestId]
+          properties:
+            code:
+              type: string
+              description: |
+                Machine-readable code, e.g. VALIDATION_ERROR, INVALID_JSON, UNAUTHORIZED, FORBIDDEN,
+                INVALID_CREDENTIALS, EMAIL_TAKEN, USER_NOT_FOUND, CANNOT_MODIFY_SELF, LAST_ADMIN,
+                NOT_FOUND, TOO_MANY_REQUESTS, INTERNAL_ERROR.
+            message: { type: string }
+            details:
+              type: array
+              items: { $ref: '#/components/schemas/ErrorDetail' }
+            requestId: { type: string }
+
+  responses:
+    ValidationError:
+      description: Invalid request (`VALIDATION_ERROR` or `INVALID_JSON`).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          example:
+            error:
+              code: VALIDATION_ERROR
+              message: Request validation failed
+              details: [{ field: password, message: 'Too small: expected string to have >=8 characters' }]
+              requestId: 1f2e-example
+    Unauthorized:
+      description: Missing, invalid or expired access token (`UNAUTHORIZED`).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    Forbidden:
+      description: Authenticated, but the role is not allowed (`FORBIDDEN`).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    UserNotFound:
+      description: Unknown user (`USER_NOT_FOUND`).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    UserConflict:
+      description: Rejected change (`CANNOT_MODIFY_SELF` or `LAST_ADMIN`).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          example:
+            error: { code: LAST_ADMIN, message: At least one active admin must remain, details: [], requestId: 7c1d-example }
+    TooManyRequests:
+      description: Rate limit exceeded (`TOO_MANY_REQUESTS`).
+      headers:
+        Retry-After:
+          description: Seconds until the client may retry.
+          schema: { type: integer }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }

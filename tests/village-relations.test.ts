@@ -10,7 +10,7 @@ import {
   type VillageName,
 } from '@prisma/client';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AuditEntry, AuditRecorder } from '../src/modules/audit/audit.service.js';
+import type { VillageAuditEntry, VillageAuditRecorder } from '../src/modules/villages/villages.audit.js';
 import type { VillageRelationsService } from '../src/modules/villages/village-relations.service.js';
 import type {
   NearbyPlaceCreateData,
@@ -94,7 +94,15 @@ class FakeRelationsStore implements VillageRepository, VillageWriteRepository {
 
   findMany = notUsed;
   findDetails = notUsed;
-  exists = notUsed;
+  /** Every call to exists(), so tests can check the FOR SHARE lock is taken inside the transaction. */
+  existsCalls: { id: string; client: Prisma.TransactionClient | undefined }[] = [];
+
+  async exists(id: string, client?: Prisma.TransactionClient): Promise<boolean> {
+    this.existsCalls.push({ id, client });
+    const row = this.villages.get(id);
+    return row !== undefined && row.deletedAt === null;
+  }
+
   findLocation = notUsed;
   findNearbyPlaceRows = notUsed;
   findVillagesWithinRadius = notUsed;
@@ -211,11 +219,11 @@ class FakeRelationsStore implements VillageRepository, VillageWriteRepository {
   }
 }
 
-class FakeAudit implements AuditRecorder {
-  entries: AuditEntry[] = [];
+class FakeAudit implements VillageAuditRecorder {
+  entries: VillageAuditEntry[] = [];
   transactions: Prisma.TransactionClient[] = [];
 
-  async record(tx: Prisma.TransactionClient, entry: AuditEntry): Promise<void> {
+  async record(tx: Prisma.TransactionClient, entry: VillageAuditEntry): Promise<void> {
     this.transactions.push(tx);
     this.entries.push(entry);
   }
@@ -396,6 +404,21 @@ describe('VillageRelationsService nearby places', () => {
       expect.objectContaining({ entityType: 'nearby_place', action: AuditAction.CREATE, entityId: created.id, before: null }),
     ]);
     expect(audit.transactions).toEqual([fakeTx]);
+  });
+
+  it('checks both villages through exists() with the transaction client, so they stay locked until commit', async () => {
+    await service.addNearby(villageA, { relatedVillageId: villageB, relation: PlaceRelation.NEARBY }, editor);
+
+    expect(store.existsCalls).toEqual([
+      { id: villageA, client: fakeTx },
+      { id: villageB, client: fakeTx },
+    ]);
+  });
+
+  it('locks the village in the URL for name writes too', async () => {
+    await service.addName(villageA, { name: 'Bayta', language: 'en', nameType: VillageNameType.TRANSLITERATION }, editor);
+
+    expect(store.existsCalls).toEqual([{ id: villageA, client: fakeTx }]);
   });
 
   it('stores a place that is not one of our villages', async () => {

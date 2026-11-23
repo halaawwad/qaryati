@@ -6,7 +6,6 @@ import {
   type PlaceRelation,
   type Village,
 } from '@prisma/client';
-import { auditService, type AuditRecorder } from '../audit/audit.service.js';
 import { AppError, NotFoundError } from '../../shared/errors.js';
 import { buildPaginationMeta, parsePagination, type PaginationMeta } from '../../shared/pagination.js';
 import {
@@ -23,6 +22,7 @@ import {
   type VillageWriteRepository,
 } from './villages.repository.js';
 import { unprocessable, versionConflict, villageNotFound } from './villages.errors.js';
+import { villageAudit, type VillageAuditRecorder } from './villages.audit.js';
 import type {
   CreateVillageInput,
   ListVillagesQuery,
@@ -164,7 +164,7 @@ async function assertConsistent(
 export class VillageService {
   constructor(
     private readonly repository: VillageRepository = villageRepository,
-    private readonly audit: AuditRecorder = auditService,
+    private readonly audit: VillageAuditRecorder = villageAudit,
   ) {}
 
   async list(query: ListVillagesQuery): Promise<VillageListResult> {
@@ -233,10 +233,11 @@ export class VillageService {
    * a foreign-key error or a row attached to a hidden village. Ids that are not UUIDs are
    * rejected without querying the database.
    *
-   * This is a check, not a lock: it does not stop the village from being soft-deleted afterwards.
+   * With a transaction client, holds a shared row lock until that transaction ends so that
+   * deletion or modification cannot race a dependent write. Without one this is only a check.
    */
-  async ensureExists(villageId: string): Promise<void> {
-    if (!UUID_PATTERN.test(villageId) || !(await this.repository.exists(villageId))) {
+  async ensureExists(villageId: string, client?: Prisma.TransactionClient): Promise<void> {
+    if (!UUID_PATTERN.test(villageId) || !(await this.repository.exists(villageId, client))) {
       throw new NotFoundError('Village not found');
     }
   }

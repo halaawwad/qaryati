@@ -6,7 +6,6 @@ import {
   type NearbyPlace as NearbyPlaceRecord,
   type VillageName,
 } from '@prisma/client';
-import { auditService, type AuditRecorder } from '../audit/audit.service.js';
 import { AppError, NotFoundError, ValidationError } from '../../shared/errors.js';
 import {
   villageRepository,
@@ -15,6 +14,7 @@ import {
   type VillageRepository,
   type VillageWriteRepository,
 } from './villages.repository.js';
+import { villageAudit, type VillageAuditRecorder } from './villages.audit.js';
 import { unprocessable, versionConflict, villageNotFound } from './villages.errors.js';
 import type { CreateNearbyPlaceInput, CreateVillageNameInput, UpdateVillageNameInput } from './villages.schemas.js';
 import type { WriteActor } from './villages.service.js';
@@ -78,11 +78,12 @@ function toNearbyResponse(row: NearbyPlaceRecord): NearbyPlaceResponse {
   return { ...row, distanceKm: row.distanceKm?.toNumber() ?? null };
 }
 
-async function loadActiveVillage(writes: VillageWriteRepository, villageId: string) {
-  const village = await writes.findById(villageId);
-  if (!village || village.deletedAt) throw villageNotFound();
-
-  return village;
+/**
+ * 404 unless the village exists and is not soft-deleted. Inside the transaction `exists` holds a
+ * FOR SHARE lock until commit, so a concurrent soft delete cannot slip in between this check and the write.
+ */
+async function ensureVillageActive(repository: VillageRepository, tx: Prisma.TransactionClient, villageId: string) {
+  if (!(await repository.exists(villageId, tx))) throw villageNotFound();
 }
 
 /** A name of another village is reported exactly like a missing one, so ids of other villages' names don't leak. */
@@ -133,7 +134,7 @@ async function assertNameRules(
 export class VillageRelationsService {
   constructor(
     private readonly repository: VillageRepository = villageRepository,
-    private readonly audit: AuditRecorder = auditService,
+    private readonly audit: VillageAuditRecorder = villageAudit,
   ) {}
 
   // --- Alternate names: soft delete and optimistic locking, like villages ---
@@ -141,7 +142,7 @@ export class VillageRelationsService {
   /** New names start as PENDING at version 1 (database defaults). */
   async addName(villageId: string, input: CreateVillageNameInput, actor: WriteActor): Promise<VillageNameResponse> {
     return this.repository.transaction(async (writes, tx) => {
-      await loadActiveVillage(writes, villageId);
+      await ensureVillageActive(this.repository, tx, villageId);
       await assertNameRules(writes, villageId, input, null);
 
       const created = await writes.createName({ ...input, villageId, createdById: actor.userId });
@@ -160,7 +161,7 @@ export class VillageRelationsService {
     const { version, ...changes } = input;
 
     return this.repository.transaction(async (writes, tx) => {
-      await loadActiveVillage(writes, villageId);
+      await ensureVillageActive(this.repository, tx, villageId);
       const before = await loadName(writes, villageId, nameId);
       if (before.version !== version) throw versionConflict(before.version, 'village name');
 
@@ -190,7 +191,7 @@ export class VillageRelationsService {
   /** Soft delete: the name stays for history but disappears from village details and search. */
   async removeName(villageId: string, nameId: string, actor: WriteActor): Promise<void> {
     await this.repository.transaction(async (writes, tx) => {
-      await loadActiveVillage(writes, villageId);
+      await ensureVillageActive(this.repository, tx, villageId);
       const before = await loadName(writes, villageId, nameId);
 
       if ((await writes.softDeleteName(nameId, actor.userId)) === 0) throw nameNotFound();
@@ -210,11 +211,13 @@ export class VillageRelationsService {
 
     try {
       return await this.repository.transaction(async (writes, tx) => {
-        await loadActiveVillage(writes, villageId);
+        await ensureVillageActive(this.repository, tx, villageId);
 
         let data: NearbyPlaceCreateData;
         if ('relatedVillageId' in input) {
-          const related = await writes.findById(input.relatedVillageId);
+          // Lock the related village too, so it cannot be soft-deleted while the relation is being written.
+          const relatedActive = await this.repository.exists(input.relatedVillageId, tx);
+          const related = relatedActive ? await writes.findById(input.relatedVillageId) : null;
           if (!related || related.deletedAt) {
             throw unprocessable('RELATED_VILLAGE_NOT_FOUND', 'relatedVillageId', 'Related village does not exist');
           }
@@ -257,7 +260,7 @@ export class VillageRelationsService {
    */
   async removeNearby(villageId: string, relationId: string, actor: WriteActor): Promise<void> {
     await this.repository.transaction(async (writes, tx) => {
-      await loadActiveVillage(writes, villageId);
+      await ensureVillageActive(this.repository, tx, villageId);
 
       // The relation must involve the village in the URL, on either side; anything else is a 404.
       const before = await writes.findNearbyById(relationId);
