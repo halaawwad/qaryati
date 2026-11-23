@@ -1,14 +1,14 @@
 import { Prisma, type PopulationRecord, type VerificationStatus } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
 import { ConflictError } from '../../shared/errors.js';
-import type { CreatePopulationInput } from './population.schemas.js';
+import type { CreatePopulationInput, UpdatePopulationInput } from './population.schemas.js';
 export interface PopulationCreateContext { actorId: string; requestId: string }
 export type PopulationDetails = Pick<PopulationRecord, 'id' | 'villageId' | 'population' | 'referenceYear' | 'referenceDate' | 'sourceId' | 'isEstimate' | 'isPreferred' | 'needsReview' | 'notes' | 'verificationStatus' | 'version' | 'createdAt' | 'updatedAt'>;
 export interface PopulationListParams {
  villageId: string; filters: { referenceYear?: number; sourceId?: string; isEstimate?: boolean; isPreferred?: boolean; needsReview?: boolean; verificationStatus?: VerificationStatus };
  sort: { field: 'referenceYear' | 'population' | 'createdAt' | 'updatedAt'; order: 'asc' | 'desc' }; skip: number; take: number;
 }
-export interface PopulationRepository { transaction<T>(fn: (client: Prisma.TransactionClient) => Promise<T>): Promise<T>; create(villageId: string, input: CreatePopulationInput, context: PopulationCreateContext, client: Prisma.TransactionClient): Promise<PopulationDetails>; findMany(params: PopulationListParams): Promise<{ items: PopulationDetails[]; total: number }>; findById(id: string): Promise<PopulationDetails | null> }
+export interface PopulationRepository { transaction<T>(fn: (client: Prisma.TransactionClient) => Promise<T>): Promise<T>; create(villageId: string, input: CreatePopulationInput, context: PopulationCreateContext, client: Prisma.TransactionClient): Promise<PopulationDetails>; findForUpdate(id: string, client: Prisma.TransactionClient): Promise<(PopulationDetails & {createdById: string | null}) | null>; update(id: string, input: UpdatePopulationInput, actorId: string, client: Prisma.TransactionClient): Promise<PopulationDetails>; findMany(params: PopulationListParams): Promise<{ items: PopulationDetails[]; total: number }>; findById(id: string): Promise<PopulationDetails | null> }
 const select = { id: true, villageId: true, population: true, referenceYear: true, referenceDate: true, sourceId: true, isEstimate: true, isPreferred: true, needsReview: true, notes: true, verificationStatus: true, version: true, createdAt: true, updatedAt: true } satisfies Prisma.PopulationRecordSelect;
 const active = { deletedAt: null, village: { deletedAt: null } } satisfies Prisma.PopulationRecordWhereInput;
 function isPopulationBusinessKeyConflict(error: unknown): boolean {
@@ -21,8 +21,28 @@ function isPopulationBusinessKeyConflict(error: unknown): boolean {
  return fields === ['village_id', 'reference_year', 'source_id'].sort().join(',') ||
   fields === ['villageId', 'referenceYear', 'sourceId'].sort().join(',');
 }
+function isPreferredIndexConflict(error: unknown): boolean {
+ return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002' &&
+  (error.meta?.modelName === undefined || error.meta.modelName === 'PopulationRecord') &&
+  error.meta?.target === 'population_records_one_preferred_per_year_idx';
+}
 export const populationRepository: PopulationRepository = {
  transaction(fn) { return prisma.$transaction(fn); },
+ async findForUpdate(id, client) {
+  const rows = await client.$queryRaw<{id: string}[]>`SELECT id FROM population_records WHERE id = ${id}::uuid AND deleted_at IS NULL FOR UPDATE`;
+  if (!rows.length) return null;
+  return client.populationRecord.findFirst({where: {id, deletedAt: null}, select: {...select, createdById: true}});
+ },
+ async update(id, input, actorId, client) {
+  const {expectedVersion, referenceDate, ...changes} = input;
+  try {
+   return await client.populationRecord.update({where: {id, deletedAt: null, version: expectedVersion}, data: {...changes, ...(referenceDate !== undefined ? {referenceDate: referenceDate === null ? null : new Date(referenceDate)} : {}), updatedById: actorId, version: {increment: 1}}, select});
+  } catch (error) {
+   if (isPopulationBusinessKeyConflict(error) || isPreferredIndexConflict(error)) throw new ConflictError('Population record conflicts with an existing record');
+   if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') throw new ConflictError('Population record changed during update');
+   throw error;
+  }
+ },
  async create(villageId, input, context, client) {
   try {
    return await client.populationRecord.create({ data: {

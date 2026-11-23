@@ -2,7 +2,7 @@ openapi: "3.0.3"
 info:
   title: Qaryati API - Population Records
   version: "1.0.0"
-  description: Population record read and create endpoints. Paths include the API prefix.
+  description: Population record read, create, and update endpoints. Paths include the API prefix.
 servers:
   - url: /
 paths:
@@ -111,6 +111,45 @@ paths:
         '429': { $ref: '#/components/responses/Error' }
         '500': { $ref: '#/components/responses/Error' }
   /api/v1/population-records/{id}:
+    patch:
+      operationId: updatePopulationRecord
+      summary: Update a population record
+      description: >-
+        EDITOR may edit their own PENDING records; REVIEWER and ADMIN may edit
+        PENDING or VERIFIED records. VERIFIED status is preserved. Direct edits to
+        REJECTED records are provisionally prohibited. An unchanged deleted source may be retained; a replacement source
+        must be active. Matching no-ops do not increment version or create an audit.
+        Other changes and their audit are atomic. Conflicts include stale versions,
+        concurrent changes, and positively identified uniqueness conflicts.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdatePopulationRecord' }
+      responses:
+        '200':
+          description: Updated or unchanged population record.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/PopulationRecord' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+        '500': { $ref: '#/components/responses/Error' }
     get:
       operationId: getPopulationRecord
       summary: Get a population record
@@ -139,6 +178,20 @@ components:
   securitySchemes:
     bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
   schemas:
+    UpdatePopulationRecord:
+      type: object
+      additionalProperties: false
+      required: [expectedVersion]
+      minProperties: 2
+      properties:
+        expectedVersion: { type: integer, minimum: 1, maximum: 2147483647 }
+        population: { type: integer, minimum: 1, maximum: 2147483647 }
+        referenceYear: { type: integer, minimum: 1800, maximum: 2100 }
+        sourceId: { type: string, format: uuid }
+        referenceDate: { type: string, format: date-time, nullable: true }
+        isEstimate: { type: boolean }
+        needsReview: { type: boolean }
+        notes: { type: string, maxLength: 5000, nullable: true, description: Trimmed before length validation. }
     CreatePopulationRecord:
       type: object
       additionalProperties: false

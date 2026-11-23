@@ -13,6 +13,16 @@ export const createPopulationSchema = z.strictObject({
  notes: z.string().trim().max(5000).nullable().optional(),
 });
 export type CreatePopulationInput = z.infer<typeof createPopulationSchema>;
+export const updatePopulationSchema = z.strictObject({
+ expectedVersion: z.number().int().positive().max(2147483647),
+ population: createPopulationSchema.shape.population.optional(),
+ referenceYear: createPopulationSchema.shape.referenceYear.optional(),
+ referenceDate: createPopulationSchema.shape.referenceDate,
+ sourceId: createPopulationSchema.shape.sourceId.optional(),
+ isEstimate: z.boolean().optional(), needsReview: z.boolean().optional(),
+ notes: createPopulationSchema.shape.notes,
+}).refine(({expectedVersion: _version, ...changes}) => Object.values(changes).some(value => value !== undefined), {message: 'At least one editable field is required'});
+export type UpdatePopulationInput = z.infer<typeof updatePopulationSchema>;
 const bool = z.enum(['true', 'false']).transform(value => value === 'true');
 const year = z.union([z.string().trim().min(1), z.number()]).transform(Number).pipe(z.number().int().min(-2147483648).max(2147483647));
 export const listPopulationQuerySchema = z.object({
