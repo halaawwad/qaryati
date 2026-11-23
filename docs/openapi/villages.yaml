@@ -25,9 +25,9 @@ info:
     | `DELETE /villages/{id}` | `ADMIN` |
     | `POST /villages/{id}/names` | `EDITOR`, `REVIEWER`, `ADMIN` |
     | `PATCH /villages/{id}/names/{nameId}` | `REVIEWER` and `ADMIN` for any name; `EDITOR` only for a name they created that is still `PENDING` (see the endpoint) |
-    | `DELETE /villages/{id}/names/{nameId}` | `REVIEWER`, `ADMIN` |
+    | `DELETE /villages/{id}/names/{nameId}` | `ADMIN` |
     | `POST /villages/{id}/nearby` | `EDITOR`, `REVIEWER`, `ADMIN` |
-    | `DELETE /villages/{id}/nearby/{relationId}` | `REVIEWER`, `ADMIN` |
+    | `DELETE /villages/{id}/nearby/{relationId}` | `ADMIN` |
 
     ## Optimistic locking
     Every village and every alternate name has an integer `version`, starting at 1. A client that
@@ -56,7 +56,7 @@ servers:
 x-implementation-source:
   reads: { ref: main, module: src/modules/villages/ }
   writes: { ref: feature/village-writes, pullRequest: 31, commit: ba6d78a, tests: 'tests/villages.writes.test.ts, tests/villages.repository.test.ts' }
-  relations: { ref: feature/village-relations, commit: ca56670, tests: tests/village-relations.test.ts }
+  relations: { ref: feature/village-relations, commit: 1b1131e, tests: tests/village-relations.test.ts }
 tags:
   - name: Villages
     description: Public search and details.
@@ -689,8 +689,9 @@ paths:
       summary: Delete an alternate name (soft delete)
       operationId: deleteVillageName
       description: |
-        Sets `deletedAt` on the name; it disappears from the village details and from the search. Takes no
-        `version`. A second delete, or a name of another village, returns 404.
+        Only an `ADMIN` may delete a name; a `REVIEWER` or an `EDITOR` gets 403 `FORBIDDEN`. Sets `deletedAt` on
+        the name; it disappears from the village details and from the search. Takes no `version`. A second
+        delete, or a name of another village, returns 404.
       security: [{ bearerAuth: [] }]
       parameters:
         - $ref: '#/components/parameters/VillageId'
@@ -713,6 +714,8 @@ paths:
       summary: Remove a nearby place
       operationId: removeNearbyPlace
       description: |
+        Only an `ADMIN` may remove a nearby place; a `REVIEWER` or an `EDITOR` gets 403 `FORBIDDEN`.
+
         Hard delete: the row is removed. The audit log keeps the full row as `before` (and `after` is `null`),
         so a removed relation can be restored from the log. The relation may be removed from either side: it
         must involve the village in the URL as the village or the related village, otherwise 404
