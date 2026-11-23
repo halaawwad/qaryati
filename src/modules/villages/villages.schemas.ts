@@ -101,6 +101,16 @@ export const villageVersionBodySchema = z.strictObject({
   version: z.number().int().positive(),
 });
 
+// --- Geo enrichment (called by the maps module, no route) ---
+
+// Both halves are required: an enrichment always places a point. Nominatim's display_name is usually
+// well under 300 characters; 500 leaves room without accepting arbitrary blobs.
+export const geoEnrichmentInputSchema = z.strictObject({
+  latitude: z.number().min(-90).max(90),
+  longitude: z.number().min(-180).max(180),
+  geoDisplayName: z.string().trim().min(1).max(500).nullable().default(null),
+});
+
 export type ListVillagesQuery = z.infer<typeof listVillagesQuerySchema>;
 export type VillageDetailsParams = z.infer<typeof villageDetailsParamsSchema>;
 export type NearbyVillagesQuery = z.infer<typeof nearbyVillagesQuerySchema>;
@@ -108,5 +118,6 @@ export type VillageIdParams = z.infer<typeof villageIdParamsSchema>;
 export type CreateVillageInput = z.infer<typeof createVillageBodySchema>;
 export type UpdateVillageInput = z.infer<typeof updateVillageBodySchema>;
 export type VillageVersionInput = z.infer<typeof villageVersionBodySchema>;
+export type GeoEnrichmentInput = z.input<typeof geoEnrichmentInputSchema>;
 export type VillageSortField = (typeof VILLAGE_SORT_FIELDS)[number];
 export type SortOrder = 'asc' | 'desc';

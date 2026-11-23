@@ -123,7 +123,15 @@ export type VillageCreateData = VillageWriteData & {
   createdById: string;
 };
 
-export type VillageChanges = VillageWriteData & { verificationStatus: VerificationStatus };
+/**
+ * geoDisplayName and geoEnrichedAt are written only by VillageService.applyGeoEnrichment; request bodies
+ * can't carry them (the write schemas are strict objects).
+ */
+export type VillageChanges = VillageWriteData & {
+  verificationStatus: VerificationStatus;
+  geoDisplayName?: string | null;
+  geoEnrichedAt?: Date;
+};
 
 /** Write-side queries, always bound to one transaction. */
 export interface VillageWriteRepository {
@@ -137,9 +145,9 @@ export interface VillageWriteRepository {
   create(data: VillageCreateData): Promise<Village>;
   /**
    * Applies the changes only while the row is still at expectedVersion and not deleted, bumping
-   * version and setting updatedById. Returns the number of rows changed (0 or 1).
+   * version and setting updatedById (null for system jobs). Returns the number of rows changed (0 or 1).
    */
-  updateIfVersion(id: string, expectedVersion: number, changes: VillageChanges, updatedById: string): Promise<number>;
+  updateIfVersion(id: string, expectedVersion: number, changes: VillageChanges, updatedById: string | null): Promise<number>;
   /** Sets deletedAt unless the row is already deleted. Returns the number of rows changed (0 or 1). */
   softDelete(id: string, updatedById: string): Promise<number>;
 }
