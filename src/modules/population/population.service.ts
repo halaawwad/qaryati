@@ -13,7 +13,9 @@ export class PopulationService {
   return this.repository.transaction(async client => {
    await this.villages.ensureExists(villageId, client);
    await sourceService.getById(input.sourceId, client);
-   const item = await this.repository.create(villageId, input, context, client);
+   const baseline = await this.repository.findLatestVerified(villageId, client);
+   const needsReview = baseline !== null && (!Number.isSafeInteger(baseline.population) || baseline.population <= 0 || Math.abs(input.population - baseline.population) * 2 > baseline.population);
+   const item = await this.repository.create(villageId, input, needsReview, context, client);
    await recordAudit({ entityType: 'PopulationRecord', entityId: item.id, action: 'CREATE', actorId: context.actorId, requestId: context.requestId, before: null,
     after: { id: item.id, villageId: item.villageId, population: item.population, referenceYear: item.referenceYear, referenceDate: item.referenceDate?.toISOString() ?? null, sourceId: item.sourceId, isEstimate: item.isEstimate, isPreferred: item.isPreferred, needsReview: item.needsReview, notes: item.notes, verificationStatus: item.verificationStatus, version: item.version },
    }, client);
