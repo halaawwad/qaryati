@@ -3,6 +3,7 @@ import {
   PlaceRelation,
   PlaceType,
   Prisma,
+  Role,
   VerificationStatus,
   VillageNameType,
   type NearbyPlace,
@@ -29,8 +30,8 @@ const villageC = '44444444-4444-4444-8444-444444444444';
 const missingId = '99999999-9999-4999-8999-999999999999';
 const sourceId = '66666666-6666-4666-8666-666666666666';
 
-const editor: WriteActor = { userId: 'editor-1', requestId: 'req-1' };
-const reviewer: WriteActor = { userId: 'reviewer-1', requestId: 'req-2' };
+const editor: WriteActor = { userId: 'editor-1', role: Role.EDITOR, requestId: 'req-1' };
+const reviewer: WriteActor = { userId: 'reviewer-1', role: Role.REVIEWER, requestId: 'req-2' };
 const fakeTx = { fake: 'tx' } as unknown as Prisma.TransactionClient;
 
 function village(id: string, nameAr: string, deletedAt: Date | null = null): Village {

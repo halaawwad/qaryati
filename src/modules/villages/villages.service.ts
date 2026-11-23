@@ -2,6 +2,7 @@ import {
   AuditAction,
   PlaceType,
   Prisma,
+  Role,
   VerificationStatus,
   type PlaceRelation,
   type Village,
@@ -23,6 +24,7 @@ import {
   type VillageWriteRepository,
 } from './villages.repository.js';
 import { unprocessable, versionConflict, villageNotFound } from './villages.errors.js';
+import { assertCanEdit } from './villages.permissions.js';
 import { villageAudit, type VillageAuditRecorder } from './villages.audit.js';
 import type {
   CreateVillageInput,
@@ -32,9 +34,11 @@ import type {
   VillageVersionInput,
 } from './villages.schemas.js';
 
-/** Who is making a change, for createdById/updatedById and the audit log. */
+/** Who is making a change, for createdById/updatedById, the audit log and the edit permissions (role). */
 export interface WriteActor {
   userId: string;
+  /** The role from the access token (req.user.role). */
+  role: Role;
   requestId: string | null;
 }
 
@@ -263,7 +267,8 @@ export class VillageService {
 
     await this.withUniqueChecks(() =>
       this.repository.transaction(async (writes, tx) => {
-        const before = await this.loadForWrite(writes, id, version);
+        // 404, then 403, then 409: who may edit is decided before the version is compared.
+        const before = await this.loadForWrite(writes, id, version, (village) => assertCanEdit(village, actor));
         await assertConsistent(writes, changes, before);
         await this.applyVersioned(writes, tx, actor, AuditAction.UPDATE, before, version, {
           ...changes,
@@ -314,10 +319,19 @@ export class VillageService {
     return this.getByIdOrSlug(id);
   }
 
-  /** Reads the row to change: 404 if missing or deleted, 409 if the client's version is already stale. */
-  private async loadForWrite(writes: VillageWriteRepository, id: string, version: number): Promise<Village> {
+  /**
+   * Reads the row to change: 404 if missing or deleted, then `authorize` (403), then 409 if the client's
+   * version is already stale. Nothing has been written at any of these points.
+   */
+  private async loadForWrite(
+    writes: VillageWriteRepository,
+    id: string,
+    version: number,
+    authorize?: (village: Village) => void,
+  ): Promise<Village> {
     const before = await writes.findById(id);
     if (!before || before.deletedAt) throw villageNotFound();
+    authorize?.(before);
     if (before.version !== version) throw versionConflict(before.version);
 
     return before;

@@ -11,7 +11,7 @@ import type {
 import type { WriteActor } from './villages.service.js';
 
 function actorOf(req: Request): WriteActor {
-  return { userId: req.user.id, requestId: req.requestId };
+  return { userId: req.user.id, role: req.user.role, requestId: req.requestId };
 }
 
 // validate() has already replaced req.params and req.body with their parsed values in every handler below.
