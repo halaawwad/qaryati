@@ -3,7 +3,7 @@ import request from 'supertest';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NotFoundError } from '../src/shared/errors.js';
 
-const service = vi.hoisted(() => ({ list: vi.fn(), getById: vi.fn() }));
+const service = vi.hoisted(() => ({ list: vi.fn(), getById: vi.fn(), create: vi.fn() }));
 vi.mock('../src/modules/facilities/facilities.service.js', () => ({ facilitiesService: service }));
 vi.mock('../src/shared/db.js', () => ({ prisma: {} }));
 vi.mock('../src/shared/cache.js', () => ({ redis: {} }));
@@ -122,7 +122,12 @@ describe('public facilities routes', () => {
     ].sort());
   });
 
-  it.each(['post', 'patch', 'delete'] as const)('does not expose %s on either facilities route', async method => {
+  it('does not expose POST on the detail route', async () => {
+    expect((await request(app).post(detailPath).send({})).status).toBe(404);
+    expect(service.create).not.toHaveBeenCalled();
+  });
+
+  it.each(['patch', 'delete'] as const)('does not expose %s on either facilities route', async method => {
     for (const path of [listPath, detailPath]) {
       const response = await request(app)[method](path).send({});
       expect(response.status).toBe(404);
@@ -130,5 +135,6 @@ describe('public facilities routes', () => {
     }
     expect(service.list).not.toHaveBeenCalled();
     expect(service.getById).not.toHaveBeenCalled();
+    expect(service.create).not.toHaveBeenCalled();
   });
 });

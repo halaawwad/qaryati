@@ -2,6 +2,18 @@ import type { RequestHandler } from 'express';
 import type { FacilitiesParams, ListFacilitiesQuery, VillageFacilitiesParams } from './facilities.schemas.js';
 import { facilitiesService } from './facilities.service.js';
 
+export const create: RequestHandler = async (req, res, next) => {
+  try {
+    const { villageId } = req.params as VillageFacilitiesParams;
+    const item = await facilitiesService.create(villageId, req.body, {
+      actorId: req.user.id, requestId: req.requestId,
+    });
+    res.status(201).json({ data: item });
+  } catch (err) {
+    next(err);
+  }
+};
+
 export const list: RequestHandler = async (req, res, next) => {
   try {
     const { villageId } = req.params as VillageFacilitiesParams;

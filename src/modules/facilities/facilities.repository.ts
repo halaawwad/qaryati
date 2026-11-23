@@ -1,6 +1,11 @@
 import type { Facility, FacilityType, Prisma, VerificationStatus } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
-import type { FacilitySortField, SortOrder } from './facilities.schemas.js';
+import type { CreateFacilityInput, FacilitySortField, SortOrder } from './facilities.schemas.js';
+
+export interface FacilityCreateContext {
+  actorId: string;
+  requestId: string;
+}
 
 export type FacilitiesDetails = Pick<
   Facility,
@@ -22,6 +27,8 @@ export interface FacilitiesListParams {
 }
 
 export interface FacilitiesRepository {
+  transaction<T>(fn: (client: Prisma.TransactionClient) => Promise<T>): Promise<T>;
+  create(villageId: string, input: CreateFacilityInput, context: FacilityCreateContext, client: Prisma.TransactionClient): Promise<FacilitiesDetails>;
   findMany(params: FacilitiesListParams): Promise<{ items: FacilitiesDetails[]; total: number }>;
   /** Only active facilities belonging to active villages are visible. */
   findById(id: string): Promise<FacilitiesDetails | null>;
@@ -76,6 +83,24 @@ function buildOrderBy({ field, order }: FacilitiesListParams['sort']): Prisma.Fa
 }
 
 export const facilitiesRepository: FacilitiesRepository = {
+  transaction(fn) {
+    return prisma.$transaction(fn);
+  },
+
+  async create(villageId, input, context, client) {
+    const row = await client.facility.create({
+      data: {
+        villageId, name: input.name, facilityType: input.facilityType, sourceId: input.sourceId,
+        description: input.description, asOfYear: input.asOfYear,
+        latitude: input.latitude, longitude: input.longitude,
+        createdById: context.actorId, updatedById: context.actorId,
+        // Prisma supplies PENDING and version 1, along with ID and timestamps.
+      },
+      select: facilitySelect,
+    });
+    return toFacility(row);
+  },
+
   async findMany(params) {
     return prisma.$transaction(async tx => {
       const where = buildWhere(params);

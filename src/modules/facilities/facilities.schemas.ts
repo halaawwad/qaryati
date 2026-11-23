@@ -31,6 +31,28 @@ export const listFacilitiesQuerySchema = z.object({
   { path: ['page'], message: `Pagination offset must not exceed ${MAX_FACILITY_OFFSET}` },
 );
 
+export const createFacilitySchema = z.strictObject({
+  name: z.string().trim().min(1).max(200),
+  facilityType: z.enum(FacilityType),
+  sourceId: z.uuid(),
+  description: z.string().trim().max(5000).optional(),
+  asOfYear: z.number().int().min(-2147483648).max(2147483647).nullable().optional(),
+  // PostgreSQL Decimal(9,6) determines stored precision; do not round request values.
+  latitude: z.number().min(-90).max(90).nullable().optional(),
+  longitude: z.number().min(-180).max(180).nullable().optional(),
+}).superRefine(({ latitude, longitude }, ctx) => {
+  const hasLatitude = latitude !== undefined && latitude !== null;
+  const hasLongitude = longitude !== undefined && longitude !== null;
+  if (hasLatitude !== hasLongitude) {
+    ctx.addIssue({
+      code: 'custom',
+      path: [hasLatitude ? 'longitude' : 'latitude'],
+      message: 'Latitude and longitude must both be numbers or both be omitted/null',
+    });
+  }
+});
+
+export type CreateFacilityInput = z.infer<typeof createFacilitySchema>;
 export type VillageFacilitiesParams = z.infer<typeof villageFacilitiesParamsSchema>;
 export type FacilitiesParams = z.infer<typeof facilitiesParamsSchema>;
 export type ListFacilitiesQuery = z.infer<typeof listFacilitiesQuerySchema>;
