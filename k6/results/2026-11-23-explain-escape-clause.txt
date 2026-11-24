@@ -1,0 +1,390 @@
+EXPLAIN (ANALYZE, BUFFERS) - the effect of an explicit ESCAPE '\' clause on the village search
+Date: 2026-11-23   Data: 20014 villages (20000 perf- seed=1), 26068 village_names, 4 trigram GIN indexes, ANALYZE run
+Code: perf/k6-village-search with the escaped pattern; the queries are the UNION count query of the search.
+
+Two runs of the same script, the first with ESCAPE '\' on every ILIKE, the second without the clause (the default
+escape character of PostgreSQL is already the backslash). Section 1 uses literal patterns; section 2 uses a prepared
+statement with a bound parameter and plan_cache_mode = force_generic_plan (how the application sends the query, and the
+case where the planner knows least). Section 3 shows that the results are the same.
+
+Summary of the execution times:
+  bei_  literal      : 191.8 ms (ESCAPE, Seq Scan on villages)   vs 12.9 ms (default, BitmapOr)
+  الزيتون literal     : 245.2 ms (ESCAPE, Seq Scan)               vs 111.9 ms (default, BitmapOr)
+  bei_  bound param  : 259.7 ms (ESCAPE, Seq Scan)               vs 7.9 ms  (default, BitmapOr)
+  الزيتون bound param : 270.3 ms (ESCAPE, Seq Scan)               vs 129.4 ms (default, BitmapOr)
+
+
+################################################################################
+# RUN 1: with ESCAPE '\' on every ILIKE
+################################################################################
+Pager usage is off.
+=== 1. Literal escaped patterns with ESCAPE (the planner sees the value): UNION count
+--- term bei_  ->  %bei_%
+                                                                          QUERY PLAN                                                                          
+--------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=1220.90..1220.91 rows=1 width=8) (actual time=189.931..189.936 rows=1 loops=1)
+   Buffers: shared hit=599
+   ->  HashAggregate  (cost=1220.74..1220.81 rows=7 width=16) (actual time=189.922..189.926 rows=0 loops=1)
+         Group Key: villages.id
+         Batches: 1  Memory Usage: 24kB
+         Buffers: shared hit=599
+         ->  Append  (cost=0.00..1220.72 rows=7 width=16) (actual time=189.916..189.921 rows=0 loops=1)
+               Buffers: shared hit=599
+               ->  Seq Scan on villages  (cost=0.00..873.25 rows=5 width=16) (actual time=187.046..187.046 rows=0 loops=1)
+                     Filter: ((deleted_at IS NULL) AND ((name_ar ~~* '%bei\_%'::text) OR (name_en ~~* '%bei\_%'::text) OR (slug ~~* '%bei\_%'::text)))
+                     Rows Removed by Filter: 20014
+                     Buffers: shared hit=523
+               ->  Nested Loop  (cost=323.52..347.44 rows=2 width=16) (actual time=2.862..2.864 rows=0 loops=1)
+                     Buffers: shared hit=76
+                     ->  Bitmap Heap Scan on village_names n  (cost=323.23..330.83 rows=2 width=16) (actual time=2.857..2.858 rows=0 loops=1)
+                           Recheck Cond: (name ~~* '%bei\_%'::text)
+                           Filter: (deleted_at IS NULL)
+                           Buffers: shared hit=76
+                           ->  Bitmap Index Scan on village_names_name_trgm_idx  (cost=0.00..323.23 rows=2 width=0) (actual time=2.744..2.745 rows=0 loops=1)
+                                 Index Cond: (name ~~* '%bei\_%'::text)
+                                 Buffers: shared hit=76
+                     ->  Index Scan using villages_pkey on villages v  (cost=0.29..8.30 rows=1 width=16) (never executed)
+                           Index Cond: (id = n.village_id)
+                           Filter: (deleted_at IS NULL)
+ Planning:
+   Buffers: shared hit=402
+ Planning Time: 24.279 ms
+ Execution Time: 191.811 ms
+(28 rows)
+
+--- term الزيتون (ordinary text, nothing to escape)
+                                                                               QUERY PLAN                                                                               
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=2425.41..2425.42 rows=1 width=8) (actual time=243.853..244.068 rows=1 loops=1)
+   Buffers: shared hit=1375
+   ->  HashAggregate  (cost=2394.57..2408.28 rows=1371 width=16) (actual time=243.031..243.804 rows=1362 loops=1)
+         Group Key: villages.id
+         Batches: 1  Memory Usage: 129kB
+         Buffers: shared hit=1375
+         ->  Append  (cost=0.00..2391.14 rows=1371 width=16) (actual time=0.113..236.727 rows=1385 loops=1)
+               Buffers: shared hit=1375
+               ->  Seq Scan on villages  (cost=0.00..873.25 rows=1180 width=16) (actual time=0.112..180.009 rows=1058 loops=1)
+                     Filter: ((deleted_at IS NULL) AND ((name_ar ~~* '%الزيتون%'::text) OR (name_en ~~* '%الزيتون%'::text) OR (slug ~~* '%الزيتون%'::text)))
+                     Rows Removed by Filter: 18956
+                     Buffers: shared hit=523
+               ->  Hash Join  (cost=685.92..1511.04 rows=191 width=16) (actual time=15.738..55.925 rows=327 loops=1)
+                     Hash Cond: (v.id = n.village_id)
+                     Buffers: shared hit=852
+                     ->  Seq Scan on villages v  (cost=0.00..723.14 rows=20014 width=16) (actual time=0.031..31.957 rows=20014 loops=1)
+                           Filter: (deleted_at IS NULL)
+                           Buffers: shared hit=523
+                     ->  Hash  (cost=683.53..683.53 rows=191 width=16) (actual time=15.124..15.126 rows=327 loops=1)
+                           Buckets: 1024  Batches: 1  Memory Usage: 24kB
+                           Buffers: shared hit=329
+                           ->  Bitmap Heap Scan on village_names n  (cost=350.24..683.53 rows=191 width=16) (actual time=3.662..14.379 rows=327 loops=1)
+                                 Recheck Cond: (name ~~* '%الزيتون%'::text)
+                                 Filter: (deleted_at IS NULL)
+                                 Heap Blocks: exact=247
+                                 Buffers: shared hit=329
+                                 ->  Bitmap Index Scan on village_names_name_trgm_idx  (cost=0.00..350.19 rows=191 width=0) (actual time=3.155..3.156 rows=327 loops=1)
+                                       Index Cond: (name ~~* '%الزيتون%'::text)
+                                       Buffers: shared hit=82
+ Planning:
+   Buffers: shared hit=18
+ Planning Time: 4.195 ms
+ Execution Time: 245.160 ms
+(33 rows)
+
+
+=== 2. A bound parameter, as Prisma sends it: prepared statement forced to a GENERIC plan (the hardest case)
+SET
+PREPARE
+--- EXECUTE q(%bei_%)
+                                                                                       QUERY PLAN                                                                                       
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=2449.97..2449.98 rows=1 width=8) (actual time=258.817..258.829 rows=1 loops=1)
+   Buffers: shared hit=600
+   ->  HashAggregate  (cost=2440.31..2444.60 rows=429 width=16) (actual time=258.805..258.815 rows=0 loops=1)
+         Group Key: villages.id
+         Batches: 1  Memory Usage: 37kB
+         Buffers: shared hit=600
+         ->  Append  (cost=0.00..2439.24 rows=429 width=16) (actual time=258.793..258.802 rows=0 loops=1)
+               Buffers: shared hit=600
+               ->  Seq Scan on villages  (cost=0.00..1023.35 rows=299 width=16) (actual time=256.757..256.757 rows=0 loops=1)
+                     Filter: ((deleted_at IS NULL) AND ((name_ar ~~* like_escape($1, '\'::text)) OR (name_en ~~* like_escape($1, '\'::text)) OR (slug ~~* like_escape($1, '\'::text))))
+                     Rows Removed by Filter: 20014
+                     Buffers: shared hit=523
+               ->  Hash Join  (cost=589.24..1413.75 rows=130 width=16) (actual time=2.029..2.035 rows=0 loops=1)
+                     Hash Cond: (v.id = n.village_id)
+                     Buffers: shared hit=77
+                     ->  Seq Scan on villages v  (cost=0.00..723.14 rows=20014 width=16) (actual time=0.036..0.037 rows=1 loops=1)
+                           Filter: (deleted_at IS NULL)
+                           Buffers: shared hit=1
+                     ->  Hash  (cost=587.61..587.61 rows=130 width=16) (actual time=1.820..1.823 rows=0 loops=1)
+                           Buckets: 1024  Batches: 1  Memory Usage: 8kB
+                           Buffers: shared hit=76
+                           ->  Bitmap Heap Scan on village_names n  (cost=315.23..587.61 rows=130 width=16) (actual time=1.817..1.818 rows=0 loops=1)
+                                 Recheck Cond: (name ~~* like_escape($1, '\'::text))
+                                 Filter: (deleted_at IS NULL)
+                                 Buffers: shared hit=76
+                                 ->  Bitmap Index Scan on village_names_name_trgm_idx  (cost=0.00..315.20 rows=130 width=0) (actual time=1.805..1.806 rows=0 loops=1)
+                                       Index Cond: (name ~~* like_escape($1, '\'::text))
+                                       Buffers: shared hit=76
+ Planning:
+   Buffers: shared hit=18
+ Planning Time: 4.573 ms
+ Execution Time: 259.711 ms
+(32 rows)
+
+--- EXECUTE q(%الزيتون%)
+                                                                                       QUERY PLAN                                                                                       
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=2449.97..2449.98 rows=1 width=8) (actual time=269.594..269.603 rows=1 loops=1)
+   Buffers: shared hit=1375
+   ->  HashAggregate  (cost=2440.31..2444.60 rows=429 width=16) (actual time=268.865..269.323 rows=1362 loops=1)
+         Group Key: villages.id
+         Batches: 1  Memory Usage: 129kB
+         Buffers: shared hit=1375
+         ->  Append  (cost=0.00..2439.24 rows=429 width=16) (actual time=0.145..263.175 rows=1385 loops=1)
+               Buffers: shared hit=1375
+               ->  Seq Scan on villages  (cost=0.00..1023.35 rows=299 width=16) (actual time=0.144..230.087 rows=1058 loops=1)
+                     Filter: ((deleted_at IS NULL) AND ((name_ar ~~* like_escape($1, '\'::text)) OR (name_en ~~* like_escape($1, '\'::text)) OR (slug ~~* like_escape($1, '\'::text))))
+                     Rows Removed by Filter: 18956
+                     Buffers: shared hit=523
+               ->  Hash Join  (cost=589.24..1413.75 rows=130 width=16) (actual time=8.395..32.131 rows=327 loops=1)
+                     Hash Cond: (v.id = n.village_id)
+                     Buffers: shared hit=852
+                     ->  Seq Scan on villages v  (cost=0.00..723.14 rows=20014 width=16) (actual time=0.044..17.205 rows=20014 loops=1)
+                           Filter: (deleted_at IS NULL)
+                           Buffers: shared hit=523
+                     ->  Hash  (cost=587.61..587.61 rows=130 width=16) (actual time=8.089..8.092 rows=327 loops=1)
+                           Buckets: 1024  Batches: 1  Memory Usage: 24kB
+                           Buffers: shared hit=329
+                           ->  Bitmap Heap Scan on village_names n  (cost=315.23..587.61 rows=130 width=16) (actual time=3.967..7.637 rows=327 loops=1)
+                                 Recheck Cond: (name ~~* like_escape($1, '\'::text))
+                                 Filter: (deleted_at IS NULL)
+                                 Heap Blocks: exact=247
+                                 Buffers: shared hit=329
+                                 ->  Bitmap Index Scan on village_names_name_trgm_idx  (cost=0.00..315.20 rows=130 width=0) (actual time=3.815..3.816 rows=327 loops=1)
+                                       Index Cond: (name ~~* like_escape($1, '\'::text))
+                                       Buffers: shared hit=82
+ Planning Time: 0.057 ms
+ Execution Time: 270.311 ms
+(31 rows)
+
+
+=== 3. Results with the escaped pattern: counts
+              term              | count 
+--------------------------------+-------
+ bei_ literal                   |     0
+ beit (control)                 |  1993
+ bei_ unescaped (old behaviour) |  1993
+(3 rows)
+
+
+
+################################################################################
+# RUN 2: without the ESCAPE clause (default escape character: backslash)
+################################################################################
+Pager usage is off.
+=== 1. Literal escaped patterns with ESCAPE (the planner sees the value): UNION count
+--- term bei_  ->  %bei_%
+                                                                         QUERY PLAN                                                                          
+-------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=128.97..128.98 rows=1 width=8) (actual time=0.442..0.449 rows=1 loops=1)
+   Buffers: shared hit=21
+   ->  HashAggregate  (cost=128.81..128.88 rows=7 width=16) (actual time=0.433..0.439 rows=0 loops=1)
+         Group Key: villages.id
+         Batches: 1  Memory Usage: 24kB
+         Buffers: shared hit=21
+         ->  Append  (cost=64.44..128.79 rows=7 width=16) (actual time=0.427..0.433 rows=0 loops=1)
+               Buffers: shared hit=21
+               ->  Bitmap Heap Scan on villages  (cost=64.44..83.06 rows=5 width=16) (actual time=0.362..0.364 rows=0 loops=1)
+                     Recheck Cond: ((name_ar ~~* '%bei\_%'::text) OR (name_en ~~* '%bei\_%'::text) OR (slug ~~* '%bei\_%'::text))
+                     Filter: (deleted_at IS NULL)
+                     Heap Blocks: exact=1
+                     Buffers: shared hit=16
+                     ->  BitmapOr  (cost=64.44..64.44 rows=5 width=0) (actual time=0.349..0.351 rows=0 loops=1)
+                           Buffers: shared hit=15
+                           ->  Bitmap Index Scan on villages_name_ar_trgm_idx  (cost=0.00..21.47 rows=2 width=0) (actual time=0.107..0.107 rows=0 loops=1)
+                                 Index Cond: (name_ar ~~* '%bei\_%'::text)
+                                 Buffers: shared hit=5
+                           ->  Bitmap Index Scan on villages_name_en_trgm_idx  (cost=0.00..21.47 rows=2 width=0) (actual time=0.212..0.213 rows=2 loops=1)
+                                 Index Cond: (name_en ~~* '%bei\_%'::text)
+                                 Buffers: shared hit=5
+                           ->  Bitmap Index Scan on villages_slug_trgm_idx  (cost=0.00..21.50 rows=2 width=0) (actual time=0.025..0.026 rows=0 loops=1)
+                                 Index Cond: (slug ~~* '%bei\_%'::text)
+                                 Buffers: shared hit=5
+               ->  Nested Loop  (cost=21.77..45.69 rows=2 width=16) (actual time=0.062..0.064 rows=0 loops=1)
+                     Buffers: shared hit=5
+                     ->  Bitmap Heap Scan on village_names n  (cost=21.48..29.08 rows=2 width=16) (actual time=0.059..0.060 rows=0 loops=1)
+                           Recheck Cond: (name ~~* '%bei\_%'::text)
+                           Filter: (deleted_at IS NULL)
+                           Buffers: shared hit=5
+                           ->  Bitmap Index Scan on village_names_name_trgm_idx  (cost=0.00..21.48 rows=2 width=0) (actual time=0.057..0.057 rows=0 loops=1)
+                                 Index Cond: (name ~~* '%bei\_%'::text)
+                                 Buffers: shared hit=5
+                     ->  Index Scan using villages_pkey on villages v  (cost=0.29..8.30 rows=1 width=16) (never executed)
+                           Index Cond: (id = n.village_id)
+                           Filter: (deleted_at IS NULL)
+ Planning:
+   Buffers: shared hit=392
+ Planning Time: 75.326 ms
+ Execution Time: 12.881 ms
+(40 rows)
+
+--- term الزيتون (ordinary text, nothing to escape)
+                                                                              QUERY PLAN                                                                               
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=1947.10..1947.11 rows=1 width=8) (actual time=104.792..104.806 rows=1 loops=1)
+   Buffers: shared hit=1263
+   ->  HashAggregate  (cost=1916.28..1929.98 rows=1370 width=16) (actual time=103.773..104.444 rows=1362 loops=1)
+         Group Key: villages.id
+         Batches: 1  Memory Usage: 129kB
+         Buffers: shared hit=1263
+         ->  Append  (cost=153.37..1912.85 rows=1370 width=16) (actual time=1.620..98.324 rows=1385 loops=1)
+               Buffers: shared hit=1263
+               ->  Bitmap Heap Scan on villages  (cost=153.37..697.00 rows=1179 width=16) (actual time=1.618..34.826 rows=1058 loops=1)
+                     Recheck Cond: ((name_ar ~~* '%الزيتون%'::text) OR (name_en ~~* '%الزيتون%'::text) OR (slug ~~* '%الزيتون%'::text))
+                     Filter: (deleted_at IS NULL)
+                     Heap Blocks: exact=449
+                     Buffers: shared hit=482
+                     ->  BitmapOr  (cost=153.37..153.37 rows=1179 width=0) (actual time=1.449..1.452 rows=0 loops=1)
+                           Buffers: shared hit=33
+                           ->  Bitmap Index Scan on villages_name_ar_trgm_idx  (cost=0.00..53.34 rows=1175 width=0) (actual time=1.295..1.295 rows=1058 loops=1)
+                                 Index Cond: (name_ar ~~* '%الزيتون%'::text)
+                                 Buffers: shared hit=11
+                           ->  Bitmap Index Scan on villages_name_en_trgm_idx  (cost=0.00..51.60 rows=2 width=0) (actual time=0.106..0.107 rows=0 loops=1)
+                                 Index Cond: (name_en ~~* '%الزيتون%'::text)
+                                 Buffers: shared hit=11
+                           ->  Bitmap Index Scan on villages_slug_trgm_idx  (cost=0.00..47.55 rows=2 width=0) (actual time=0.044..0.044 rows=0 loops=1)
+                                 Index Cond: (slug ~~* '%الزيتون%'::text)
+                                 Buffers: shared hit=11
+               ->  Hash Join  (cost=384.17..1209.00 rows=191 width=16) (actual time=7.034..62.358 rows=327 loops=1)
+                     Hash Cond: (v.id = n.village_id)
+                     Buffers: shared hit=781
+                     ->  Seq Scan on villages v  (cost=0.00..722.95 rows=19995 width=16) (actual time=0.041..38.619 rows=20014 loops=1)
+                           Filter: (deleted_at IS NULL)
+                           Buffers: shared hit=523
+                     ->  Hash  (cost=381.78..381.78 rows=191 width=16) (actual time=6.792..6.795 rows=327 loops=1)
+                           Buckets: 1024  Batches: 1  Memory Usage: 24kB
+                           Buffers: shared hit=258
+                           ->  Bitmap Heap Scan on village_names n  (cost=48.49..381.78 rows=191 width=16) (actual time=1.030..6.307 rows=327 loops=1)
+                                 Recheck Cond: (name ~~* '%الزيتون%'::text)
+                                 Filter: (deleted_at IS NULL)
+                                 Heap Blocks: exact=247
+                                 Buffers: shared hit=258
+                                 ->  Bitmap Index Scan on village_names_name_trgm_idx  (cost=0.00..48.44 rows=191 width=0) (actual time=0.855..0.855 rows=327 loops=1)
+                                       Index Cond: (name ~~* '%الزيتون%'::text)
+                                       Buffers: shared hit=11
+ Planning:
+   Buffers: shared hit=16
+ Planning Time: 15.782 ms
+ Execution Time: 111.903 ms
+(45 rows)
+
+
+=== 2. A bound parameter, as Prisma sends it: prepared statement forced to a GENERIC plan (the hardest case)
+SET
+PREPARE
+--- EXECUTE q(%bei_%)
+                                                                             QUERY PLAN                                                                              
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=1638.61..1638.62 rows=1 width=8) (actual time=0.536..0.543 rows=1 loops=1)
+   Buffers: shared hit=22
+   ->  HashAggregate  (cost=1628.98..1633.26 rows=428 width=16) (actual time=0.528..0.535 rows=0 loops=1)
+         Group Key: villages.id
+         Batches: 1  Memory Usage: 37kB
+         Buffers: shared hit=22
+         ->  Append  (cost=40.12..1627.91 rows=428 width=16) (actual time=0.520..0.527 rows=0 loops=1)
+               Buffers: shared hit=22
+               ->  Bitmap Heap Scan on villages  (cost=40.12..514.06 rows=298 width=16) (actual time=0.269..0.272 rows=0 loops=1)
+                     Recheck Cond: ((name_ar ~~* like_escape($1, '\'::text)) OR (name_en ~~* like_escape($1, '\'::text)) OR (slug ~~* like_escape($1, '\'::text)))
+                     Filter: (deleted_at IS NULL)
+                     Heap Blocks: exact=1
+                     Buffers: shared hit=16
+                     ->  BitmapOr  (cost=40.12..40.12 rows=300 width=0) (actual time=0.246..0.248 rows=0 loops=1)
+                           Buffers: shared hit=15
+                           ->  Bitmap Index Scan on villages_name_ar_trgm_idx  (cost=0.00..13.29 rows=100 width=0) (actual time=0.075..0.075 rows=0 loops=1)
+                                 Index Cond: (name_ar ~~* like_escape($1, '\'::text))
+                                 Buffers: shared hit=5
+                           ->  Bitmap Index Scan on villages_name_en_trgm_idx  (cost=0.00..13.29 rows=100 width=0) (actual time=0.142..0.142 rows=2 loops=1)
+                                 Index Cond: (name_en ~~* like_escape($1, '\'::text))
+                                 Buffers: shared hit=5
+                           ->  Bitmap Index Scan on villages_slug_trgm_idx  (cost=0.00..13.31 rows=100 width=0) (actual time=0.025..0.025 rows=0 loops=1)
+                                 Index Cond: (slug ~~* like_escape($1, '\'::text))
+                                 Buffers: shared hit=5
+               ->  Hash Join  (cost=287.49..1111.71 rows=130 width=16) (actual time=0.248..0.251 rows=0 loops=1)
+                     Hash Cond: (v.id = n.village_id)
+                     Buffers: shared hit=6
+                     ->  Seq Scan on villages v  (cost=0.00..722.95 rows=19995 width=16) (actual time=0.019..0.019 rows=1 loops=1)
+                           Filter: (deleted_at IS NULL)
+                           Buffers: shared hit=1
+                     ->  Hash  (cost=285.86..285.86 rows=130 width=16) (actual time=0.116..0.118 rows=0 loops=1)
+                           Buckets: 1024  Batches: 1  Memory Usage: 8kB
+                           Buffers: shared hit=5
+                           ->  Bitmap Heap Scan on village_names n  (cost=13.48..285.86 rows=130 width=16) (actual time=0.115..0.115 rows=0 loops=1)
+                                 Recheck Cond: (name ~~* like_escape($1, '\'::text))
+                                 Filter: (deleted_at IS NULL)
+                                 Buffers: shared hit=5
+                                 ->  Bitmap Index Scan on village_names_name_trgm_idx  (cost=0.00..13.45 rows=130 width=0) (actual time=0.041..0.041 rows=0 loops=1)
+                                       Index Cond: (name ~~* like_escape($1, '\'::text))
+                                       Buffers: shared hit=5
+ Planning:
+   Buffers: shared hit=16
+ Planning Time: 3.298 ms
+ Execution Time: 7.886 ms
+(44 rows)
+
+--- EXECUTE q(%الزيتون%)
+                                                                              QUERY PLAN                                                                               
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=1638.61..1638.62 rows=1 width=8) (actual time=127.588..127.607 rows=1 loops=1)
+   Buffers: shared hit=1263
+   ->  HashAggregate  (cost=1628.98..1633.26 rows=428 width=16) (actual time=126.607..127.203 rows=1362 loops=1)
+         Group Key: villages.id
+         Batches: 1  Memory Usage: 129kB
+         Buffers: shared hit=1263
+         ->  Append  (cost=40.12..1627.91 rows=428 width=16) (actual time=2.153..113.841 rows=1385 loops=1)
+               Buffers: shared hit=1263
+               ->  Bitmap Heap Scan on villages  (cost=40.12..514.06 rows=298 width=16) (actual time=2.150..20.173 rows=1058 loops=1)
+                     Recheck Cond: ((name_ar ~~* like_escape($1, '\'::text)) OR (name_en ~~* like_escape($1, '\'::text)) OR (slug ~~* like_escape($1, '\'::text)))
+                     Filter: (deleted_at IS NULL)
+                     Heap Blocks: exact=449
+                     Buffers: shared hit=482
+                     ->  BitmapOr  (cost=40.12..40.12 rows=300 width=0) (actual time=1.887..1.892 rows=0 loops=1)
+                           Buffers: shared hit=33
+                           ->  Bitmap Index Scan on villages_name_ar_trgm_idx  (cost=0.00..13.29 rows=100 width=0) (actual time=1.725..1.725 rows=1058 loops=1)
+                                 Index Cond: (name_ar ~~* like_escape($1, '\'::text))
+                                 Buffers: shared hit=11
+                           ->  Bitmap Index Scan on villages_name_en_trgm_idx  (cost=0.00..13.29 rows=100 width=0) (actual time=0.116..0.117 rows=0 loops=1)
+                                 Index Cond: (name_en ~~* like_escape($1, '\'::text))
+                                 Buffers: shared hit=11
+                           ->  Bitmap Index Scan on villages_slug_trgm_idx  (cost=0.00..13.31 rows=100 width=0) (actual time=0.042..0.042 rows=0 loops=1)
+                                 Index Cond: (slug ~~* like_escape($1, '\'::text))
+                                 Buffers: shared hit=11
+               ->  Hash Join  (cost=287.49..1111.71 rows=130 width=16) (actual time=14.813..92.945 rows=327 loops=1)
+                     Hash Cond: (v.id = n.village_id)
+                     Buffers: shared hit=781
+                     ->  Seq Scan on villages v  (cost=0.00..722.95 rows=19995 width=16) (actual time=0.052..59.662 rows=20014 loops=1)
+                           Filter: (deleted_at IS NULL)
+                           Buffers: shared hit=523
+                     ->  Hash  (cost=285.86..285.86 rows=130 width=16) (actual time=14.508..14.513 rows=327 loops=1)
+                           Buckets: 1024  Batches: 1  Memory Usage: 24kB
+                           Buffers: shared hit=258
+                           ->  Bitmap Heap Scan on village_names n  (cost=13.48..285.86 rows=130 width=16) (actual time=1.099..3.714 rows=327 loops=1)
+                                 Recheck Cond: (name ~~* like_escape($1, '\'::text))
+                                 Filter: (deleted_at IS NULL)
+                                 Heap Blocks: exact=247
+                                 Buffers: shared hit=258
+                                 ->  Bitmap Index Scan on village_names_name_trgm_idx  (cost=0.00..13.45 rows=130 width=0) (actual time=0.940..0.941 rows=327 loops=1)
+                                       Index Cond: (name ~~* like_escape($1, '\'::text))
+                                       Buffers: shared hit=11
+ Planning Time: 0.063 ms
+ Execution Time: 129.432 ms
+(43 rows)
+
+
+=== 3. Results with the escaped pattern: counts
+              term              | count 
+--------------------------------+-------
+ bei_ literal                   |     0
+ beit (control)                 |  1993
+ bei_ unescaped (old behaviour) |  1993
+(3 rows)
+
