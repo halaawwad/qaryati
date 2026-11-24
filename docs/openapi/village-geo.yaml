@@ -88,9 +88,12 @@ paths:
         409. Missing, expired or foreign candidate references are 400. Stale village/candidate
         identity or version and replay are 409. Active-row locking, optimistic version checks,
         geo update and UPDATE audit share one transaction. Audit failure rolls back all
-        changes. Only geo fields, updater, version and updatedAt change. VerificationStatus
-        is preserved, not automatically promoted. Response and audit reflect persisted
-        Decimal(9,6) coordinates. Response Cache-Control is no-store.
+        changes. Geo delegates to villageService.applyGeoEnrichment, which resets
+        verificationStatus to PENDING and writes exactly one lowercase village UPDATE
+        audit with source=geo-enrichment and candidate provenance. Response coordinates
+        are persisted Decimal(9,6) numbers; audit decimals follow the village convention
+        of JSON strings. Candidate display names longer than the shared service's
+        500-character limit return 400 VALIDATION_ERROR. Response Cache-Control is no-store.
       parameters:
         - { $ref: "#/components/parameters/GeoVillageId" }
       requestBody:
@@ -113,7 +116,7 @@ paths:
                   geoDisplayName: "Synthetic documentation fixture"
                   geoEnrichedAt: "2026-11-23T12:01:00.000Z"
                   version: 2
-                  verificationStatus: VERIFIED
+                  verificationStatus: PENDING
                   updatedAt: "2026-11-23T12:01:00.000Z"
         "400": { $ref: "#/components/responses/GeoBadRequest" }
         "401": { $ref: "#/components/responses/GeoUnauthorized" }
@@ -199,7 +202,7 @@ components:
             geoDisplayName: { type: string }
             geoEnrichedAt: { type: string, format: date-time }
             version: { type: integer, minimum: 2 }
-            verificationStatus: { type: string, enum: [PENDING, VERIFIED, REJECTED], description: "Preserved village-wide status." }
+            verificationStatus: { type: string, enum: [PENDING], description: "New coordinates reset village-wide status to PENDING." }
             updatedAt: { type: string, format: date-time }
     GeoErrorEnvelope:
       type: object
@@ -238,7 +241,7 @@ components:
       description: "404 NOT_FOUND: village does not exist or is soft-deleted."
       content: { application/json: { schema: { $ref: "#/components/schemas/GeoErrorEnvelope" } } }
     GeoConflict:
-      description: "409 CONFLICT: stale version/identity, concurrent update, replay, or existing coordinates without explicit overwrite permission."
+      description: "409 CONFLICT: stale candidate version/identity, replay, or existing coordinates without explicit overwrite permission. A version change detected by the shared village write transaction returns VERSION_CONFLICT with the current version in details."
       content: { application/json: { schema: { $ref: "#/components/schemas/GeoErrorEnvelope" } } }
     GeoTooLarge:
       description: "413 PAYLOAD_TOO_LARGE: shared JSON body limit exceeded."

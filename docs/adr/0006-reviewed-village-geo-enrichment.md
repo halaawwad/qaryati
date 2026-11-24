@@ -1,4 +1,4 @@
-# ADR-0005: Reviewed village geo enrichment through a replaceable provider
+# ADR-0006: Reviewed village geo enrichment through a replaceable provider
 
 Status: Proposed for local review (November 2026).
 
@@ -6,14 +6,14 @@ Status: Proposed for local review (November 2026).
 
 Requirements #24/#25 need external geographic lookup and controlled application to
 existing villages. Nearby Villages already computes distances from stored coordinates.
-The schema already has coordinates, geoDisplayName and geoEnrichedAt. No existing
-applyGeoEnrichment function or village-response cache exists on this branch.
+The schema already has coordinates, geoDisplayName and geoEnrichedAt. The existing
+VillageService.applyGeoEnrichment owns geographic writes and their audit transaction.
 
 ## Decision
 
-Keep routes → controller → service → repository. Add focused geo service/repository
-files inside Villages without replacing its public reads or Haversine SQL. Services
-orchestrate AuditService using the same Prisma transaction as the village update.
+Keep routes → controller → service → repository. The Geo service orchestrates candidate
+review and delegates reads and writes to VillageService. No separate Geo repository
+or audit write path is needed. Public reads and Haversine SQL remain unchanged.
 
 GeoProvider accepts stored Arabic/English identity, governorate and country context
 and returns normalized candidates. Nominatim is the initial provider because it offers
@@ -68,12 +68,17 @@ default. References bind coordinates to village identity and version, and cannot
 replaced by client coordinates. Manual confirmation is mandatory even for one candidate.
 Any existing coordinate, including zero, additionally requires overwriteExisting=true.
 
-Apply locks the active village FOR UPDATE, checks current version, identity and token
-expiry, updates only geo fields/updater/version/timestamp, and audits before/after plus
-provider reference, actor and request ID in the transaction. PostgreSQL-rounded values
-are returned and audited. Replay loses the version check. Audit failure rolls back the
-update. VerificationStatus is preserved: a reviewed geographic correction is not an
-automatic verification of every village attribute. No Source is fabricated; provider
+Geo checks candidate identity and version, then calls VillageService.applyGeoEnrichment
+with the authenticated actor, expected version and explicit overwrite choice. Its single
+transaction locks the active village FOR UPDATE for reviewed candidates and checks expiry
+after lock acquisition. The existing guarded update resets verificationStatus to PENDING,
+increments version and records one UPDATE audit with entityType `village`, source
+`geo-enrichment`, and candidate provenance. PostgreSQL-rounded values are returned;
+audit decimals use the existing village JSON adapter (strings). Replay loses the version
+check. Audit failure rolls back the update. Existing coordinates without confirmation
+produce the Geo endpoint's 409 by mapping the shared service's no-write `skipped` result.
+The shared service's 500-character display-name limit applies without truncation.
+No Source is fabricated; provider
 provenance belongs to this geo audit. A dedicated geo verification/source model would
 require a separate team decision. No schema or migration changes are needed.
 

@@ -64,16 +64,17 @@ describe('geo with real disposable PostgreSQL and Redis; upstream HTTP mocked', 
   it('persists rounded coordinates, timestamps, actor, version and atomic audit without changing unrelated fields', async () => {
     const v = await village(); const ref = await selection(v.id);
     const response = await apply(v.id, ref, 1, false, 'geo-success'); expect(response.status).toBe(200);
-    expect(response.body.data).toMatchObject({ latitude: 31.123457, longitude: 35.765432, version: 2, verificationStatus: 'VERIFIED', geoDisplayName: providerRow.display_name });
+    expect(response.body.data).toMatchObject({ latitude: 31.123457, longitude: 35.765432, version: 2, verificationStatus: 'PENDING', geoDisplayName: providerRow.display_name });
     const stored = await db.village.findUniqueOrThrow({ where: { id: v.id } });
     expect(stored.latitude!.toNumber()).toBe(response.body.data.latitude);
     expect(stored.geoEnrichedAt!.toISOString()).toBe(response.body.data.geoEnrichedAt);
     expect(stored.updatedById).toBe(actorId); expect(stored.historicalOverview).toBe(v.historicalOverview);
     expect(stored.nameAr).toBe(v.nameAr); expect(stored.createdAt).toEqual(v.createdAt);
     const audit = await db.auditLog.findFirstOrThrow({ where: { entityId: v.id } });
-    expect(audit).toMatchObject({ actorId, requestId: 'geo-success', entityType: 'Village', action: 'UPDATE' });
+    expect(await db.auditLog.count({ where: { entityId: v.id, requestId: 'geo-success' } })).toBe(1);
+    expect(audit).toMatchObject({ actorId, requestId: 'geo-success', entityType: 'village', action: 'UPDATE' });
     expect(audit.before).toMatchObject({ latitude: null, version: 1 });
-    expect(audit.after).toMatchObject({ latitude: response.body.data.latitude, version: 2, provenance: { provider: 'nominatim', candidateRef: ref } });
+    expect(audit.after).toMatchObject({ latitude: String(response.body.data.latitude), version: 2, verificationStatus: 'PENDING', source: 'geo-enrichment', provenance: { provider: 'nominatim', candidateRef: ref } });
     expect((await request(app).get('/api/v1/villages/' + v.id)).body.data.latitude).toBe(response.body.data.latitude);
   });
   it('actual audit failure rolls back every village change', async () => {

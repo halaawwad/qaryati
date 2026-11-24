@@ -6,7 +6,7 @@ This feature provides two authenticated ADMIN/REVIEWER operations:
 - POST `/api/v1/villages/:id/geo-enrichment`
 
 Public village reads and Nearby Villages remain unchanged. OpenAPI:
-[village-geo.yaml](openapi/village-geo.yaml). Design: [ADR-0005](adr/0005-reviewed-village-geo-enrichment.md).
+[village-geo.yaml](openapi/village-geo.yaml). Design: [ADR-0006](adr/0006-reviewed-village-geo-enrichment.md).
 
 ## Configuration
 
@@ -189,12 +189,14 @@ Do not populate real records with the synthetic coordinates used in automated te
    ```
 
    Use the actual copied version. Expect 200 with persisted coordinates, geoDisplayName,
-   geoEnrichedAt, incremented version, unchanged verificationStatus and updatedAt.
+   geoEnrichedAt, incremented version, verificationStatus reset to PENDING and updatedAt.
 6. If coordinates already exist, expect 409. Only after deliberate review, repeat with
    `overwriteExisting: true` and the same still-current candidate/version. A stale version
    needs a new lookup. Both omitted confirmation and arbitrary coordinates are 400.
 7. GET the public village details and its `/nearby?radiusKm=5` route to review the result.
-   Inspect the Village UPDATE audit for request ID, actor, before/after and provenance.
+   Inspect the single `village` UPDATE audit for request ID, actor, before/after,
+   `source: geo-enrichment` and candidate provenance. Decimal audit values are strings,
+   following the existing village audit adapter.
 8. Repeat the successful apply: expect 409. Use an expired/foreign reference: 400.
    Without a token: 401. With EDITOR: 403. Missing/deleted village: 404.
 
@@ -222,7 +224,12 @@ provider traffic or development/production writes occur. Containers and volumes 
 in finally. A forcibly killed runner may require removing only its `qaryati-geo-test-*`
 containers manually after inspecting their IDs.
 
-No schema/migration change or village cache invalidation was required. All business
-verification status is preserved; the audit records manual geo review and OSM provenance.
+No schema/migration change or village cache invalidation was required. Geo delegates to
+`villageService.applyGeoEnrichment()` for its single write/audit transaction. New
+coordinates reset verification status to PENDING under the existing village rules.
+Candidate expiry is rechecked after acquiring the village write lock; the guarded
+update enforces the reviewed version. No second audit is inserted by Geo. The shared
+service rejects display names longer than 500 characters with 400 VALIDATION_ERROR;
+it does not truncate a reviewed candidate. The audit records manual geo review and OSM provenance.
 The current scope is `ps`; OSM coverage/classification and transliteration mismatches can
 produce no matches. Broader historical/geographic scope requires an explicit team policy.

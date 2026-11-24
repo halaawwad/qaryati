@@ -40,6 +40,7 @@ export const applyGeoEnrichment: RequestHandler = async (req, res, next) => {
       req.body,
       {
         actorId: req.user.id,
+        role: req.user.role,
         requestId: req.requestId,
       },
     );

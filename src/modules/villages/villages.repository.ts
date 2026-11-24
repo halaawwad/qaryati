@@ -166,7 +166,7 @@ export interface NearbyPlaceCreateData {
 /** Write-side queries, always bound to one transaction. */
 export interface VillageWriteRepository {
   /** The full row, including soft-deleted ones; used for checks and as the audit snapshot. */
-  findById(id: string): Promise<Village | null>;
+  findById(id: string, lockForUpdate?: boolean): Promise<Village | null>;
   governorateExists(id: string): Promise<boolean>;
   /** The local authority's governorate id, or null when the local authority does not exist. */
   findLocalAuthorityGovernorateId(id: string): Promise<string | null>;
@@ -400,7 +400,8 @@ function buildOrderBy({ field, order }: VillageListParams['sort']): Prisma.Villa
 
 function buildWriteRepository(tx: Prisma.TransactionClient): VillageWriteRepository {
   return {
-    findById(id) {
+    async findById(id, lockForUpdate = false) {
+      if (lockForUpdate) await tx.$queryRaw`SELECT id FROM villages WHERE id = ${id}::uuid AND deleted_at IS NULL FOR UPDATE`;
       return tx.village.findUnique({ where: { id } });
     },
 

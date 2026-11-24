@@ -30,7 +30,7 @@ describe('village geo routes', () => {
     expect(candidates.status).toBe(200); expect(candidates.body.data.status).toBe('no_match');
     const response = await request(app).post(path + '/geo-enrichment').set('Authorization', auth(role)).set('X-Request-Id', 'geo-request').send(body);
     expect(response.status).toBe(200); expect(response.body).toEqual({ data: { id, version: 2 } });
-    expect(service.apply).toHaveBeenCalledWith(id, { ...body, overwriteExisting: false }, { actorId, requestId: 'geo-request' });
+    expect(service.apply).toHaveBeenCalledWith(id, { ...body, overwriteExisting: false }, { actorId, role, requestId: 'geo-request' });
   });
   it.each([undefined, 'Bearer bad', 'Basic bad'])('requires valid authentication: %s', async authorization => {
     for (const method of ['get', 'post'] as const) {
