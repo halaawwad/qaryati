@@ -19,11 +19,18 @@ export class PopulationService {
   if (!initial) throw new NotFoundError('Population record not found');
   return this.repository.transaction(async client => {
    await this.villages.ensureExists(initial.villageId, client);
-   if (input.sourceId !== undefined && input.sourceId !== initial.sourceId) await sourceService.getById(input.sourceId, client);
+   // Keep the source lock before the population lock, but defer a missing-source
+   // response until authorization has been checked against the locked record.
+   let missingSource: NotFoundError | undefined;
+   if (input.sourceId !== undefined && input.sourceId !== initial.sourceId) {
+    try { await sourceService.getById(input.sourceId, client); }
+    catch (error) { if (error instanceof NotFoundError) missingSource = error; else throw error; }
+   }
    const current = await this.repository.findForUpdate(id, client);
    if (!current || current.villageId !== initial.villageId || current.sourceId !== initial.sourceId) throw new ConflictError('Population record changed during update');
    const allowed = context.role === 'EDITOR' ? current.verificationStatus === 'PENDING' && current.createdById === context.actorId : (context.role === 'REVIEWER' || context.role === 'ADMIN') && (current.verificationStatus === 'PENDING' || current.verificationStatus === 'VERIFIED');
    if (!allowed) throw new ForbiddenError('Direct editing is not permitted for this population record');
+   if (missingSource) throw missingSource;
    if (current.version !== input.expectedVersion) throw new ConflictError('Population record version conflict');
    const {createdById: _creator, ...before} = current;
    const {expectedVersion: _version, ...changes} = input;

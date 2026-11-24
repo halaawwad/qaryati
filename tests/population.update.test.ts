@@ -45,6 +45,38 @@ describe('population PATCH',()=>{
  it('retains an unchanged source without checking its active status',async()=>{expect((await patch({expectedVersion:2,sourceId,population:200})).status).toBe(200);expect(db.source).not.toHaveBeenCalled();});
  it('locks village then changed source then population and audits persisted changes',async()=>{const res=await patch({expectedVersion:2,sourceId:otherSource,notes:' hi '});expect(res.status).toBe(200);expect(db.lock.mock.calls.map(call=>(call[0] as TemplateStringsArray).join(''))).toEqual([expect.stringContaining('FROM villages'),expect.stringContaining('FROM sources'),expect.stringContaining('FROM population_records')]);expect(db.audit.mock.calls[0][0].data).toMatchObject({action:'UPDATE',actorId:actor,before:{sourceId,notes:null,version:2},after:{sourceId:otherSource,notes:'hi',version:3}});});
  it('returns 404 when a replacement source is not active',async()=>{db.lock.mockResolvedValueOnce([{id:villageId}]).mockResolvedValueOnce([]);expect((await patch({expectedVersion:2,sourceId:otherSource})).status).toBe(404);expect(db.update).not.toHaveBeenCalled();});
+ it.each([
+  ['another creator', 'missing', {createdById:'66666666-6666-4666-8666-666666666666'}, 403],
+  ['forbidden status', 'missing', {verificationStatus:'VERIFIED'}, 403],
+  ['another creator', 'soft-deleted', {createdById:'66666666-6666-4666-8666-666666666666'}, 403],
+  ['authorized editor', 'missing', {}, 404],
+  ['authorized editor', 'soft-deleted', {}, 404],
+ ])('%s with a %s replacement source gets the appropriate response',async(_description, _sourceState, changes, expected)=>{
+  Object.assign(row,changes);
+  // Both missing and soft-deleted sources are excluded by the active-source lock query.
+  db.lock.mockImplementation(async (query, value)=>{
+   if ((query as TemplateStringsArray).join('').includes('FROM sources')) {
+    expect((query as TemplateStringsArray).join('')).toContain('deleted_at IS NULL');
+    return [];
+   }
+   return [{id:value}];
+  });
+  const response=await patch({expectedVersion:2,sourceId:otherSource});
+  expect(response.status).toBe(expected);
+  expect(db.lockedFind).toHaveBeenCalledOnce();
+  expect(db.update).not.toHaveBeenCalled(); expect(db.audit).not.toHaveBeenCalled();
+ });
+ it.each([{createdById:'66666666-6666-4666-8666-666666666666'},{verificationStatus:'VERIFIED'}])('rechecks changed authorization on the locked record: %j',async changes=>{
+  db.lockedFind.mockImplementationOnce(async()=>({...row,...changes}));
+  expect((await patch({expectedVersion:2,sourceId:otherSource})).status).toBe(403);
+  expect(db.lockedFind).toHaveBeenCalledOnce(); expect(db.update).not.toHaveBeenCalled(); expect(db.audit).not.toHaveBeenCalled();
+ });
+ it('checks locked authorization before reporting a missing source after a concurrent ownership change',async()=>{
+  db.lock.mockResolvedValueOnce([{id:villageId}]).mockResolvedValueOnce([]);
+  db.lockedFind.mockImplementationOnce(async()=>({...row,createdById:'66666666-6666-4666-8666-666666666666'}));
+  expect((await patch({expectedVersion:2,sourceId:otherSource})).status).toBe(403);
+  expect(db.update).not.toHaveBeenCalled(); expect(db.audit).not.toHaveBeenCalled();
+ });
  it('returns 404 for missing records and 409 on conditional race',async()=>{db.find.mockResolvedValueOnce(null);expect((await patch({expectedVersion:2,population:200})).status).toBe(404);db.update.mockRejectedValueOnce(new Prisma.PrismaClientKnownRequestError('gone',{code:'P2025',clientVersion:'6.19.3'}));expect((await patch({expectedVersion:2,population:200})).status).toBe(409);});
  it('only translates recognized business-key uniqueness errors',async()=>{const error=(target:string[])=>new Prisma.PrismaClientKnownRequestError('unique',{code:'P2002',clientVersion:'6.19.3',meta:{modelName:'PopulationRecord',target}});db.update.mockRejectedValueOnce(error(['village_id','reference_year','source_id']));expect((await patch({expectedVersion:2,population:200})).status).toBe(409);db.update.mockRejectedValueOnce(error(['id']));expect((await patch({expectedVersion:2,population:200})).status).toBe(500);});
  it('propagates audit failures from the transaction',async()=>{db.audit.mockRejectedValue(new Error('audit failure'));expect((await patch({expectedVersion:2,population:200})).status).toBe(500);expect(db.update).toHaveBeenCalledOnce();expect(db.audit).toHaveBeenCalledOnce();});

@@ -122,7 +122,8 @@ paths:
         EDITOR may edit their own PENDING records; REVIEWER and ADMIN may edit
         PENDING or VERIFIED records. VERIFIED status is preserved. Direct edits to
         REJECTED records are provisionally prohibited. An unchanged deleted source may be retained; a replacement source
-        must be active. Matching no-ops do not increment version or create an audit.
+        must be active. Record authorization is checked before a missing or deleted
+        replacement source is reported. Matching no-ops do not increment version or create an audit.
         Other changes and their audit are atomic. Conflicts include stale versions,
         concurrent changes, and positively identified uniqueness conflicts. Provisionally,
         changing population compares it with the latest other non-deleted VERIFIED record
