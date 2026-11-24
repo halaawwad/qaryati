@@ -103,9 +103,26 @@ The page query still reads all of `villages` for the final join with the ids (ab
 - **Small dataset, laptop hardware.** 20,000 villages is a realistic order of magnitude for this data, but absolute numbers will differ on other hardware. The indexes are not created `CONCURRENTLY` (that cannot run inside a migration transaction); for a much larger production table they should be created out of band, as the migration comment says.
 - **The warm-up is short** (15 s), so caches are mostly but not fully warm; it was the same for all three runs.
 
-## Known issue: `%` and `_` are not escaped
+## Search term escaping (fixed)
 
-The search term is passed to `ILIKE` as `%term%` without escaping, so `%` and `_` act as wildcards: `search=%` returns every village (20,014 in the test data), `bei_` matches the same villages as `beit`, and a backslash is the `LIKE` escape character. This is how the endpoint behaved before this work, and the `UNION` query deliberately keeps it, so the totals stay identical across the measurements (the totals check includes these cases). It will be fixed in a separate pull request.
+The search term used to be passed to `ILIKE` as `%term%` without escaping, so `%` and `_` acted as wildcards: `search=%` returned every village (20,014 in the test data), `bei_` matched the same villages as `beit`, and a backslash was the `LIKE` escape character. The measurements above were taken with that behaviour on purpose, so that the totals stayed identical (the totals check includes these cases).
+
+It is fixed on `fix/village-search-escape-wildcards`: the term is escaped (`\`, `%` and `_` each get a backslash in front) before it goes into `%term%`, so all three are matched literally. `search=%` now finds the names that contain a percent sign, `bei_` no longer matches `beit`, and `100%` and `a\b` match as written. Ordinary Arabic, English, alternate-name and slug searches behave as before. This is covered by unit tests and by a PostgreSQL integration test (`tests/integration/villages.search.postgres.integration.ts`, run with `npm run test:integration`). The five wildcard queries in the totals check are expected to change with this fix and nothing else is.
+
+The k6 numbers in this page were measured before the fix and were not repeated after it. The fix does not change the plan (see below), but it has not been measured under load.
+
+### Why there is no `ESCAPE` clause
+
+The obvious way to write the fix is `ILIKE ... ESCAPE '\'`. It is not used, because it changes the plan. A backslash is already PostgreSQL's default `LIKE` escape character, so the clause adds nothing to the result, but with it the planner stops using the trigram indexes on `villages` and goes back to a sequential scan. Measured with `EXPLAIN ANALYZE` on the 20,014 villages, on the `UNION` count query, with a literal pattern and with a bound parameter (a prepared statement forced to a generic plan, the hardest case; this is how the application sends it):
+
+| Term | With `ESCAPE '\'` | Without it (default escape) |
+|---|---|---|
+| `bei_`, literal pattern (no matches) | 191.8 ms, sequential scan on `villages` | 12.9 ms, `BitmapOr` over the three indexes |
+| `الزيتون`, literal pattern (about 1,000 matches) | 245.2 ms, sequential scan | 111.9 ms, `BitmapOr` |
+| `bei_`, bound parameter | 259.7 ms, sequential scan | 7.9 ms, `BitmapOr` |
+| `الزيتون`, bound parameter | 270.3 ms, sequential scan | 129.4 ms, `BitmapOr` |
+
+The clause costs 190 to 270 ms in every case; without it a selective term takes 8 to 13 ms and a common one 110 to 130 ms. With the clause the estimated cost of an index scan is much higher (about 320, against 21 to 53 without it) and the planner chooses the sequential scan; that is what the plans show, not an analysis of the planner's internals. The results are the same either way (`bei_` finds 0 villages, `beit` finds 1,993). The plans and timings are in [the EXPLAIN file](../k6/results/2026-11-23-explain-escape-clause.txt). The comment on `escapeLikePattern` says not to add the clause back without measuring again.
 
 ## Write scenario
 

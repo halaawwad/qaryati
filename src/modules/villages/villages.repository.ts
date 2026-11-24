@@ -318,6 +318,23 @@ const SORT_COLUMNS: Record<VillageSortField, Prisma.Sql> = {
 };
 
 /**
+ * Escapes the characters that mean something inside a LIKE pattern, so a search term is matched literally.
+ * The backslash comes first in the character class on purpose: every `\`, `%` and `_` gets a backslash in front
+ * of it in one pass, so the escapes added for `%` and `_` are not escaped again.
+ *
+ * The queries below do NOT say ESCAPE '\' on purpose. A backslash is already PostgreSQL's default LIKE escape
+ * character, so the clause would change nothing about the result, but writing it makes the planner stop using the
+ * trigram indexes on villages: it falls back to a sequential scan. On 20,000 villages the count query took
+ * 190-270 ms with the clause, against 8-13 ms without it for a selective term and 110-130 ms for a common one
+ * (about 1,000 matches), where the plan is a BitmapOr over the indexes. Measured with EXPLAIN ANALYZE, with
+ * literal patterns and with a bound parameter. Do not add the clause back without measuring again; see
+ * docs/performance.md.
+ */
+export function escapeLikePattern(term: string): string {
+  return term.replace(/[\\%_]/g, '\\$&');
+}
+
+/**
  * The ids of the villages that match a search term, one page of them, and the total.
  *
  * Why this is raw SQL: Prisma's `OR [nameAr, nameEn, slug, names some]` becomes
@@ -326,12 +343,13 @@ const SORT_COLUMNS: Record<VillageSortField, Prisma.Sql> = {
  * scan of villages even when the indexes exist. Splitting it into a UNION lets each side use its own index
  * (a BitmapOr over the three villages indexes, and a Bitmap scan of village_names).
  *
- * The result is the same as before: the pattern is `%term%` with no escaping of % or _, exactly what Prisma's
- * `contains` sent, the filters apply to the village on both sides, and the order is the sort column then id.
- * Everything is bound as a parameter except the whitelisted column and direction.
+ * The term is matched literally: `\`, `%` and `_` in it are escaped (see escapeLikePattern, which also explains
+ * why there is no ESCAPE clause), so searching for `%` finds names that contain a percent sign, not every
+ * village, and `bei_` does not match `beit`. The filters apply to the village on both sides, and the order is
+ * the sort column then id. Everything is bound as a parameter except the whitelisted column and direction.
  */
 async function findIdsBySearch({ filters, sort, skip, take }: VillageListParams): Promise<{ ids: string[]; total: number }> {
-  const pattern = `%${filters.search ?? ''}%`;
+  const pattern = `%${escapeLikePattern(filters.search ?? '')}%`;
 
   const conditions = [Prisma.sql`v.deleted_at IS NULL`];
   if (filters.governorateId) conditions.push(Prisma.sql`v.governorate_id = ${filters.governorateId}::uuid`);

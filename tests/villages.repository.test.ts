@@ -1,6 +1,10 @@
 import { Prisma } from '@prisma/client';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { villageRepository, type VillageListParams } from '../src/modules/villages/villages.repository.js';
+import {
+  escapeLikePattern,
+  villageRepository,
+  type VillageListParams,
+} from '../src/modules/villages/villages.repository.js';
 
 // The tagged-template calls are recorded instead of run, so the SQL that findMany builds can be inspected.
 const db = vi.hoisted(() => ({
@@ -79,15 +83,38 @@ describe('villageRepository.findMany with a search term', () => {
     expect(count?.text).toMatch(/^SELECT count\(\*\) AS total FROM \(/);
   });
 
-  it('binds %term% without escaping % or _, exactly as Prisma contains did', async () => {
-    for (const term of ['beit', '%', '_', 'bei_', '100%', 'a\\b']) {
+  it('binds the escaped term as %term%: \, % and _ are matched literally', async () => {
+    const cases: [string, string][] = [
+      ['beit', '%beit%'],
+      ['بيتا', '%بيتا%'],
+      ['%', '%\\%%'],
+      ['_', '%\\_%'],
+      ['bei_', '%bei\\_%'],
+      ['100%', '%100\\%%'],
+      ['a\\b', '%a\\\\b%'],
+      ['50%_\\', '%50\\%\\_\\\\%'],
+    ];
+
+    for (const [term, pattern] of cases) {
       recorded.length = 0;
       await villageRepository.findMany(baseParams({ search: term }));
 
-      const values = recorded.map(flatten).flatMap((query) => query.values);
-      expect(values).toContain(`%${term}%`);
-      expect(values).not.toContain(`%\\${term}%`);
-      expect(recorded.map(flatten).every((query) => !query.text.includes(`%${term}%`))).toBe(true);
+      const queries = recorded.map(flatten);
+      for (const query of queries) {
+        expect(query.values).toContain(pattern);
+        // Only a term with a special character changes; ordinary text keeps the same pattern as before.
+        if (pattern !== `%${term}%`) expect(query.values).not.toContain(`%${term}%`);
+      }
+    }
+  });
+
+  it('uses plain ILIKE with the default escape: no ESCAPE clause, which would stop the trigram indexes being used', async () => {
+    await villageRepository.findMany(baseParams());
+
+    for (const query of recorded.map(flatten)) {
+      // Four conditions in each of the count and the page query: name_ar, name_en, slug, and the alternate name.
+      expect(query.text.match(/ILIKE \$\d+/g) ?? []).toHaveLength(4);
+      expect(query.text).not.toMatch(/ESCAPE/i);
     }
   });
 
@@ -190,5 +217,27 @@ describe('villageRepository.findMany without a search term', () => {
       where: expect.objectContaining({ deletedAt: null, governorateId: '11111111-1111-4111-8111-111111111111' }),
     });
     expect(result).toMatchObject({ total: 1, items: [{ id: 'a' }] });
+  });
+});
+
+describe('escapeLikePattern', () => {
+  it('puts a backslash in front of each backslash, percent sign and underscore', () => {
+    expect(escapeLikePattern('%')).toBe('\\%');
+    expect(escapeLikePattern('_')).toBe('\\_');
+    expect(escapeLikePattern('\\')).toBe('\\\\');
+    expect(escapeLikePattern('bei_')).toBe('bei\\_');
+    expect(escapeLikePattern('100%')).toBe('100\\%');
+    expect(escapeLikePattern('a\\b')).toBe('a\\\\b');
+  });
+
+  it('does not escape an escape twice', () => {
+    expect(escapeLikePattern('%_')).toBe('\\%\\_');
+    expect(escapeLikePattern('\\%')).toBe('\\\\\\%');
+  });
+
+  it('leaves ordinary text alone, Arabic and English, and the empty string', () => {
+    for (const text of ['beit', 'Beit Iba', 'بيت', 'كفر الرمان', 'al-sharqiya', 'zaytun', '']) {
+      expect(escapeLikePattern(text)).toBe(text);
+    }
   });
 });
