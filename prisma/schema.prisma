@@ -235,6 +235,11 @@ model Village {
   @@index([nameOriginSourceId])
   @@index([createdById])
   @@index([updatedById])
+  // Trigram indexes for ILIKE '%term%' search (pg_trgm, created in 20261022140729_add_trigram_search_indexes).
+  // Declared here so `prisma migrate dev` doesn't treat them as drift and drop them.
+  @@index([nameAr(ops: raw("gin_trgm_ops"))], type: Gin, map: "villages_name_ar_trgm_idx")
+  @@index([nameEn(ops: raw("gin_trgm_ops"))], type: Gin, map: "villages_name_en_trgm_idx")
+  @@index([slug(ops: raw("gin_trgm_ops"))], type: Gin, map: "villages_slug_trgm_idx")
   @@map("villages")
 }
 
@@ -263,6 +268,8 @@ model VillageName {
   @@index([sourceId])
   @@index([createdById])
   @@index([updatedById])
+  // Trigram index for alternate-name search; see the villages model.
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "village_names_name_trgm_idx")
   @@map("village_names")
 }
 

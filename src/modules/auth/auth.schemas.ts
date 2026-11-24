@@ -1,8 +1,16 @@
 import { z } from 'zod';
 
+// bcrypt only uses the first 72 bytes, so longer passwords would be silently truncated.
+const MAX_PASSWORD_BYTES = 72;
+
 export const registerSchema = z.object({
   email: z.string().trim().email(),
-  password: z.string().min(8),
+  password: z
+    .string()
+    .min(8)
+    .refine((value) => Buffer.byteLength(value, 'utf8') <= MAX_PASSWORD_BYTES, {
+      message: `Must be at most ${MAX_PASSWORD_BYTES} bytes`,
+    }),
   fullName: z.string().trim().min(1),
 });
 

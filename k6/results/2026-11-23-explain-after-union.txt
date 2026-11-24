@@ -1,0 +1,536 @@
+EXPLAIN (ANALYZE, BUFFERS) - village search, AFTER trigram indexes and the UNION query
+Date: 2026-11-23   App: perf/k6-village-search@bfebc3a (UNION in a tagged $queryRaw)   Data: 20014 villages (20000 perf- seed=1), 26068 village_names, 4 trigram GIN indexes
+
+The SQL was copied from the Postgres statement log (log_statement=all, set temporarily and reset), one real request
+per term to GET /api/v1/villages?search=..., and run here with the bound parameters inlined. A request may run
+more than one statement (count, page, and for some code paths an id lookup). Pager usage is off.
+
+=== environment ===
+PostgreSQL 16.15 on x86_64-pc-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit
+
+20014 villages
+26068 village_names
+
+village_names_created_by_id_idx  CREATE INDEX village_names_created_by_id_idx ON public.village_names USING btree (created_by_id)
+village_names_name_trgm_idx  CREATE INDEX village_names_name_trgm_idx ON public.village_names USING gin (name gin_trgm_ops)
+village_names_pkey  CREATE UNIQUE INDEX village_names_pkey ON public.village_names USING btree (id)
+village_names_source_id_idx  CREATE INDEX village_names_source_id_idx ON public.village_names USING btree (source_id)
+village_names_updated_by_id_idx  CREATE INDEX village_names_updated_by_id_idx ON public.village_names USING btree (updated_by_id)
+village_names_village_id_idx  CREATE INDEX village_names_village_id_idx ON public.village_names USING btree (village_id)
+villages_created_by_id_idx  CREATE INDEX villages_created_by_id_idx ON public.villages USING btree (created_by_id)
+villages_governorate_id_idx  CREATE INDEX villages_governorate_id_idx ON public.villages USING btree (governorate_id)
+villages_local_authority_id_idx  CREATE INDEX villages_local_authority_id_idx ON public.villages USING btree (local_authority_id)
+villages_name_ar_trgm_idx  CREATE INDEX villages_name_ar_trgm_idx ON public.villages USING gin (name_ar gin_trgm_ops)
+villages_name_en_trgm_idx  CREATE INDEX villages_name_en_trgm_idx ON public.villages USING gin (name_en gin_trgm_ops)
+villages_name_origin_source_id_idx  CREATE INDEX villages_name_origin_source_id_idx ON public.villages USING btree (name_origin_source_id)
+villages_pcbs_code_key  CREATE UNIQUE INDEX villages_pcbs_code_key ON public.villages USING btree (pcbs_code)
+villages_pkey  CREATE UNIQUE INDEX villages_pkey ON public.villages USING btree (id)
+villages_slug_key  CREATE UNIQUE INDEX villages_slug_key ON public.villages USING btree (slug)
+villages_slug_trgm_idx  CREATE INDEX villages_slug_trgm_idx ON public.villages USING gin (slug gin_trgm_ops)
+villages_updated_by_id_idx  CREATE INDEX villages_updated_by_id_idx ON public.villages USING btree (updated_by_id)
+
+=== Arabic search (term: الزيتون) - statement 1 of 2 ===
+SELECT count(*) AS total FROM (
+	    SELECT v.id FROM villages v
+	    WHERE v.deleted_at IS NULL AND (v.name_ar ILIKE '%الزيتون%' OR v.name_en ILIKE '%الزيتون%' OR v.slug ILIKE '%الزيتون%')
+	    UNION
+	    SELECT v.id FROM village_names n
+	    JOIN villages v ON v.id = n.village_id
+	    WHERE v.deleted_at IS NULL AND n.deleted_at IS NULL AND n.name ILIKE '%الزيتون%'
+	  ) AS m
+
+                                                                           QUERY PLAN                                                                            
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=2957.08..2957.09 rows=1 width=8) (actual time=10.198..10.202 rows=1 loops=1)
+   Buffers: shared hit=1719
+   ->  HashAggregate  (cost=2926.23..2939.94 rows=1371 width=16) (actual time=9.801..10.066 rows=1362 loops=1)
+         Group Key: v.id
+         Batches: 1  Memory Usage: 129kB
+         Buffers: shared hit=1719
+         ->  Append  (cost=153.37..2922.80 rows=1371 width=16) (actual time=0.860..8.975 rows=1385 loops=1)
+               Buffers: shared hit=1719
+               ->  Bitmap Heap Scan on villages v  (cost=153.37..1267.69 rows=1180 width=16) (actual time=0.859..5.037 rows=1058 loops=1)
+                     Recheck Cond: ((name_ar ~~* '%الزيتون%'::text) OR (name_en ~~* '%الزيتون%'::text) OR (slug ~~* '%الزيتون%'::text))
+                     Filter: (deleted_at IS NULL)
+                     Heap Blocks: exact=453
+                     Buffers: shared hit=486
+                     ->  BitmapOr  (cost=153.37..153.37 rows=1180 width=0) (actual time=0.767..0.769 rows=0 loops=1)
+                           Buffers: shared hit=33
+                           ->  Bitmap Index Scan on villages_name_ar_trgm_idx  (cost=0.00..53.35 rows=1177 width=0) (actual time=0.669..0.669 rows=1058 loops=1)
+                                 Index Cond: (name_ar ~~* '%الزيتون%'::text)
+                                 Buffers: shared hit=11
+                           ->  Bitmap Index Scan on villages_name_en_trgm_idx  (cost=0.00..51.60 rows=2 width=0) (actual time=0.067..0.067 rows=0 loops=1)
+                                 Index Cond: (name_en ~~* '%الزيتون%'::text)
+                                 Buffers: shared hit=11
+                           ->  Bitmap Index Scan on villages_slug_trgm_idx  (cost=0.00..47.55 rows=2 width=0) (actual time=0.030..0.030 rows=0 loops=1)
+                                 Index Cond: (slug ~~* '%الزيتون%'::text)
+                                 Buffers: shared hit=11
+               ->  Nested Loop  (cost=48.78..1648.25 rows=191 width=16) (actual time=0.518..3.697 rows=327 loops=1)
+                     Buffers: shared hit=1233
+                     ->  Bitmap Heap Scan on village_names n  (cost=48.49..498.00 rows=191 width=16) (actual time=0.458..2.069 rows=327 loops=1)
+                           Recheck Cond: (name ~~* '%الزيتون%'::text)
+                           Filter: (deleted_at IS NULL)
+                           Heap Blocks: exact=241
+                           Buffers: shared hit=252
+                           ->  Bitmap Index Scan on village_names_name_trgm_idx  (cost=0.00..48.44 rows=191 width=0) (actual time=0.398..0.398 rows=327 loops=1)
+                                 Index Cond: (name ~~* '%الزيتون%'::text)
+                                 Buffers: shared hit=11
+                     ->  Index Scan using villages_pkey on villages v_1  (cost=0.29..6.02 rows=1 width=16) (actual time=0.004..0.004 rows=1 loops=327)
+                           Index Cond: (id = n.village_id)
+                           Filter: (deleted_at IS NULL)
+                           Buffers: shared hit=981
+ Planning:
+   Buffers: shared hit=392
+ Planning Time: 12.225 ms
+ Execution Time: 11.633 ms
+(42 rows)
+
+
+=== Arabic search (term: الزيتون) - statement 2 of 2 ===
+SELECT v.id FROM (
+	    SELECT v.id FROM villages v
+	    WHERE v.deleted_at IS NULL AND (v.name_ar ILIKE '%الزيتون%' OR v.name_en ILIKE '%الزيتون%' OR v.slug ILIKE '%الزيتون%')
+	    UNION
+	    SELECT v.id FROM village_names n
+	    JOIN villages v ON v.id = n.village_id
+	    WHERE v.deleted_at IS NULL AND n.deleted_at IS NULL AND n.name ILIKE '%الزيتون%'
+	  ) AS m
+	      JOIN villages v ON v.id = m.id
+	      ORDER BY v.name_ar ASC , v.id ASC
+	      LIMIT '20' OFFSET '0'
+
+                                                                                    QUERY PLAN                                                                                     
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=4290.25..4290.30 rows=20 width=47) (actual time=18.339..18.352 rows=20 loops=1)
+   Buffers: shared hit=2769
+   ->  Sort  (cost=4290.25..4293.68 rows=1371 width=47) (actual time=18.336..18.347 rows=20 loops=1)
+         Sort Key: v.name_ar, v.id
+         Sort Method: top-N heapsort  Memory: 28kB
+         Buffers: shared hit=2769
+         ->  Hash Join  (cost=2957.08..4253.77 rows=1371 width=47) (actual time=10.551..17.442 rows=1362 loops=1)
+               Hash Cond: (v.id = v_1.id)
+               Buffers: shared hit=2763
+               ->  Seq Scan on villages v  (cost=0.00..1244.14 rows=20014 width=47) (actual time=0.005..3.156 rows=20014 loops=1)
+                     Buffers: shared hit=1044
+               ->  Hash  (cost=2939.94..2939.94 rows=1371 width=16) (actual time=9.625..9.633 rows=1362 loops=1)
+                     Buckets: 2048  Batches: 1  Memory Usage: 80kB
+                     Buffers: shared hit=1719
+                     ->  HashAggregate  (cost=2926.23..2939.94 rows=1371 width=16) (actual time=8.931..9.171 rows=1362 loops=1)
+                           Group Key: v_1.id
+                           Batches: 1  Memory Usage: 129kB
+                           Buffers: shared hit=1719
+                           ->  Append  (cost=153.37..2922.80 rows=1371 width=16) (actual time=0.890..8.228 rows=1385 loops=1)
+                                 Buffers: shared hit=1719
+                                 ->  Bitmap Heap Scan on villages v_1  (cost=153.37..1267.69 rows=1180 width=16) (actual time=0.889..4.738 rows=1058 loops=1)
+                                       Recheck Cond: ((name_ar ~~* '%الزيتون%'::text) OR (name_en ~~* '%الزيتون%'::text) OR (slug ~~* '%الزيتون%'::text))
+                                       Filter: (deleted_at IS NULL)
+                                       Heap Blocks: exact=453
+                                       Buffers: shared hit=486
+                                       ->  BitmapOr  (cost=153.37..153.37 rows=1180 width=0) (actual time=0.798..0.800 rows=0 loops=1)
+                                             Buffers: shared hit=33
+                                             ->  Bitmap Index Scan on villages_name_ar_trgm_idx  (cost=0.00..53.35 rows=1177 width=0) (actual time=0.699..0.700 rows=1058 loops=1)
+                                                   Index Cond: (name_ar ~~* '%الزيتون%'::text)
+                                                   Buffers: shared hit=11
+                                             ->  Bitmap Index Scan on villages_name_en_trgm_idx  (cost=0.00..51.60 rows=2 width=0) (actual time=0.072..0.073 rows=0 loops=1)
+                                                   Index Cond: (name_en ~~* '%الزيتون%'::text)
+                                                   Buffers: shared hit=11
+                                             ->  Bitmap Index Scan on villages_slug_trgm_idx  (cost=0.00..47.55 rows=2 width=0) (actual time=0.025..0.025 rows=0 loops=1)
+                                                   Index Cond: (slug ~~* '%الزيتون%'::text)
+                                                   Buffers: shared hit=11
+                                 ->  Nested Loop  (cost=48.78..1648.25 rows=191 width=16) (actual time=0.462..3.292 rows=327 loops=1)
+                                       Buffers: shared hit=1233
+                                       ->  Bitmap Heap Scan on village_names n  (cost=48.49..498.00 rows=191 width=16) (actual time=0.413..1.768 rows=327 loops=1)
+                                             Recheck Cond: (name ~~* '%الزيتون%'::text)
+                                             Filter: (deleted_at IS NULL)
+                                             Heap Blocks: exact=241
+                                             Buffers: shared hit=252
+                                             ->  Bitmap Index Scan on village_names_name_trgm_idx  (cost=0.00..48.44 rows=191 width=0) (actual time=0.352..0.352 rows=327 loops=1)
+                                                   Index Cond: (name ~~* '%الزيتون%'::text)
+                                                   Buffers: shared hit=11
+                                       ->  Index Scan using villages_pkey on villages v_2  (cost=0.29..6.02 rows=1 width=16) (actual time=0.004..0.004 rows=1 loops=327)
+                                             Index Cond: (id = n.village_id)
+                                             Filter: (deleted_at IS NULL)
+                                             Buffers: shared hit=981
+ Planning:
+   Buffers: shared hit=391
+ Planning Time: 12.528 ms
+ Execution Time: 20.045 ms
+(54 rows)
+
+
+=== English search (term: Deir) - statement 1 of 2 ===
+SELECT count(*) AS total FROM (
+	    SELECT v.id FROM villages v
+	    WHERE v.deleted_at IS NULL AND (v.name_ar ILIKE '%Deir%' OR v.name_en ILIKE '%Deir%' OR v.slug ILIKE '%Deir%')
+	    UNION
+	    SELECT v.id FROM village_names n
+	    JOIN villages v ON v.id = n.village_id
+	    WHERE v.deleted_at IS NULL AND n.deleted_at IS NULL AND n.name ILIKE '%Deir%'
+	  ) AS m
+
+                                                                           QUERY PLAN                                                                            
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=1275.43..1275.44 rows=1 width=8) (actual time=10.826..10.830 rows=1 loops=1)
+   Buffers: shared hit=531
+   ->  HashAggregate  (cost=1231.92..1251.26 rows=1934 width=16) (actual time=10.267..10.633 rows=1950 loops=1)
+         Group Key: v.id
+         Batches: 1  Memory Usage: 241kB
+         Buffers: shared hit=531
+         ->  Append  (cost=75.52..1227.08 rows=1934 width=16) (actual time=0.978..9.304 rows=1950 loops=1)
+               Buffers: shared hit=531
+               ->  Bitmap Heap Scan on villages v  (cost=75.52..1171.60 rows=1932 width=16) (actual time=0.978..8.993 rows=1950 loops=1)
+                     Recheck Cond: ((name_ar ~~* '%Deir%'::text) OR (name_en ~~* '%Deir%'::text) OR (slug ~~* '%Deir%'::text))
+                     Filter: (deleted_at IS NULL)
+                     Heap Blocks: exact=511
+                     Buffers: shared hit=526
+                     ->  BitmapOr  (cost=75.52..75.52 rows=1932 width=0) (actual time=0.866..0.868 rows=0 loops=1)
+                           Buffers: shared hit=15
+                           ->  Bitmap Index Scan on villages_name_ar_trgm_idx  (cost=0.00..21.47 rows=2 width=0) (actual time=0.035..0.035 rows=0 loops=1)
+                                 Index Cond: (name_ar ~~* '%Deir%'::text)
+                                 Buffers: shared hit=5
+                           ->  Bitmap Index Scan on villages_name_en_trgm_idx  (cost=0.00..31.10 rows=1929 width=0) (actual time=0.813..0.813 rows=1950 loops=1)
+                                 Index Cond: (name_en ~~* '%Deir%'::text)
+                                 Buffers: shared hit=5
+                           ->  Bitmap Index Scan on villages_slug_trgm_idx  (cost=0.00..21.50 rows=2 width=0) (actual time=0.017..0.017 rows=1 loops=1)
+                                 Index Cond: (slug ~~* '%Deir%'::text)
+                                 Buffers: shared hit=5
+               ->  Nested Loop  (cost=21.77..45.82 rows=2 width=16) (actual time=0.037..0.038 rows=0 loops=1)
+                     Buffers: shared hit=5
+                     ->  Bitmap Heap Scan on village_names n  (cost=21.48..29.21 rows=2 width=16) (actual time=0.036..0.036 rows=0 loops=1)
+                           Recheck Cond: (name ~~* '%Deir%'::text)
+                           Filter: (deleted_at IS NULL)
+                           Buffers: shared hit=5
+                           ->  Bitmap Index Scan on village_names_name_trgm_idx  (cost=0.00..21.48 rows=2 width=0) (actual time=0.035..0.035 rows=0 loops=1)
+                                 Index Cond: (name ~~* '%Deir%'::text)
+                                 Buffers: shared hit=5
+                     ->  Index Scan using villages_pkey on villages v_1  (cost=0.29..8.30 rows=1 width=16) (never executed)
+                           Index Cond: (id = n.village_id)
+                           Filter: (deleted_at IS NULL)
+ Planning:
+   Buffers: shared hit=392
+ Planning Time: 12.857 ms
+ Execution Time: 12.451 ms
+(40 rows)
+
+
+=== English search (term: Deir) - statement 2 of 2 ===
+SELECT v.id FROM (
+	    SELECT v.id FROM villages v
+	    WHERE v.deleted_at IS NULL AND (v.name_ar ILIKE '%Deir%' OR v.name_en ILIKE '%Deir%' OR v.slug ILIKE '%Deir%')
+	    UNION
+	    SELECT v.id FROM village_names n
+	    JOIN villages v ON v.id = n.village_id
+	    WHERE v.deleted_at IS NULL AND n.deleted_at IS NULL AND n.name ILIKE '%Deir%'
+	  ) AS m
+	      JOIN villages v ON v.id = m.id
+	      ORDER BY v.name_ar ASC , v.id ASC
+	      LIMIT '20' OFFSET '0'
+
+                                                                                    QUERY PLAN                                                                                     
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=2623.58..2623.63 rows=20 width=47) (actual time=20.136..20.149 rows=20 loops=1)
+   Buffers: shared hit=1581
+   ->  Sort  (cost=2623.58..2628.42 rows=1934 width=47) (actual time=20.134..20.144 rows=20 loops=1)
+         Sort Key: v.name_ar, v.id
+         Sort Method: top-N heapsort  Memory: 28kB
+         Buffers: shared hit=1581
+         ->  Hash Join  (cost=1275.43..2572.12 rows=1934 width=47) (actual time=10.853..18.894 rows=1950 loops=1)
+               Hash Cond: (v.id = v_1.id)
+               Buffers: shared hit=1575
+               ->  Seq Scan on villages v  (cost=0.00..1244.14 rows=20014 width=47) (actual time=0.006..3.211 rows=20014 loops=1)
+                     Buffers: shared hit=1044
+               ->  Hash  (cost=1251.26..1251.26 rows=1934 width=16) (actual time=10.787..10.793 rows=1950 loops=1)
+                     Buckets: 2048  Batches: 1  Memory Usage: 108kB
+                     Buffers: shared hit=531
+                     ->  HashAggregate  (cost=1231.92..1251.26 rows=1934 width=16) (actual time=9.787..10.139 rows=1950 loops=1)
+                           Group Key: v_1.id
+                           Batches: 1  Memory Usage: 241kB
+                           Buffers: shared hit=531
+                           ->  Append  (cost=75.52..1227.08 rows=1934 width=16) (actual time=0.835..8.833 rows=1950 loops=1)
+                                 Buffers: shared hit=531
+                                 ->  Bitmap Heap Scan on villages v_1  (cost=75.52..1171.60 rows=1932 width=16) (actual time=0.834..8.549 rows=1950 loops=1)
+                                       Recheck Cond: ((name_ar ~~* '%Deir%'::text) OR (name_en ~~* '%Deir%'::text) OR (slug ~~* '%Deir%'::text))
+                                       Filter: (deleted_at IS NULL)
+                                       Heap Blocks: exact=511
+                                       Buffers: shared hit=526
+                                       ->  BitmapOr  (cost=75.52..75.52 rows=1932 width=0) (actual time=0.729..0.731 rows=0 loops=1)
+                                             Buffers: shared hit=15
+                                             ->  Bitmap Index Scan on villages_name_ar_trgm_idx  (cost=0.00..21.47 rows=2 width=0) (actual time=0.028..0.028 rows=0 loops=1)
+                                                   Index Cond: (name_ar ~~* '%Deir%'::text)
+                                                   Buffers: shared hit=5
+                                             ->  Bitmap Index Scan on villages_name_en_trgm_idx  (cost=0.00..31.10 rows=1929 width=0) (actual time=0.689..0.690 rows=1950 loops=1)
+                                                   Index Cond: (name_en ~~* '%Deir%'::text)
+                                                   Buffers: shared hit=5
+                                             ->  Bitmap Index Scan on villages_slug_trgm_idx  (cost=0.00..21.50 rows=2 width=0) (actual time=0.011..0.011 rows=1 loops=1)
+                                                   Index Cond: (slug ~~* '%Deir%'::text)
+                                                   Buffers: shared hit=5
+                                 ->  Nested Loop  (cost=21.77..45.82 rows=2 width=16) (actual time=0.032..0.034 rows=0 loops=1)
+                                       Buffers: shared hit=5
+                                       ->  Bitmap Heap Scan on village_names n  (cost=21.48..29.21 rows=2 width=16) (actual time=0.031..0.031 rows=0 loops=1)
+                                             Recheck Cond: (name ~~* '%Deir%'::text)
+                                             Filter: (deleted_at IS NULL)
+                                             Buffers: shared hit=5
+                                             ->  Bitmap Index Scan on village_names_name_trgm_idx  (cost=0.00..21.48 rows=2 width=0) (actual time=0.030..0.030 rows=0 loops=1)
+                                                   Index Cond: (name ~~* '%Deir%'::text)
+                                                   Buffers: shared hit=5
+                                       ->  Index Scan using villages_pkey on villages v_2  (cost=0.29..8.30 rows=1 width=16) (never executed)
+                                             Index Cond: (id = n.village_id)
+                                             Filter: (deleted_at IS NULL)
+ Planning:
+   Buffers: shared hit=391
+ Planning Time: 11.686 ms
+ Execution Time: 22.180 ms
+(52 rows)
+
+
+=== alternate-name search (term: Bayt) - statement 1 of 2 ===
+SELECT count(*) AS total FROM (
+	    SELECT v.id FROM villages v
+	    WHERE v.deleted_at IS NULL AND (v.name_ar ILIKE '%Bayt%' OR v.name_en ILIKE '%Bayt%' OR v.slug ILIKE '%Bayt%')
+	    UNION
+	    SELECT v.id FROM village_names n
+	    JOIN villages v ON v.id = n.village_id
+	    WHERE v.deleted_at IS NULL AND n.deleted_at IS NULL AND n.name ILIKE '%Bayt%'
+	  ) AS m
+
+                                                                               QUERY PLAN                                                                                
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=2384.02..2384.03 rows=1 width=8) (actual time=22.495..22.501 rows=1 loops=1)
+   Buffers: shared hit=1464
+   ->  HashAggregate  (cost=2341.41..2360.35 rows=1894 width=16) (actual time=21.965..22.330 rows=1993 loops=1)
+         Group Key: v.id
+         Batches: 1  Memory Usage: 241kB
+         Buffers: shared hit=1464
+         ->  Append  (cost=64.44..2336.67 rows=1894 width=16) (actual time=7.414..20.923 rows=1993 loops=1)
+               Buffers: shared hit=1464
+               ->  Bitmap Heap Scan on villages v  (cost=64.44..83.49 rows=5 width=16) (actual time=0.101..0.103 rows=0 loops=1)
+                     Recheck Cond: ((name_ar ~~* '%Bayt%'::text) OR (name_en ~~* '%Bayt%'::text) OR (slug ~~* '%Bayt%'::text))
+                     Filter: (deleted_at IS NULL)
+                     Buffers: shared hit=15
+                     ->  BitmapOr  (cost=64.44..64.44 rows=5 width=0) (actual time=0.099..0.101 rows=0 loops=1)
+                           Buffers: shared hit=15
+                           ->  Bitmap Index Scan on villages_name_ar_trgm_idx  (cost=0.00..21.47 rows=2 width=0) (actual time=0.033..0.033 rows=0 loops=1)
+                                 Index Cond: (name_ar ~~* '%Bayt%'::text)
+                                 Buffers: shared hit=5
+                           ->  Bitmap Index Scan on villages_name_en_trgm_idx  (cost=0.00..21.47 rows=2 width=0) (actual time=0.051..0.051 rows=0 loops=1)
+                                 Index Cond: (name_en ~~* '%Bayt%'::text)
+                                 Buffers: shared hit=5
+                           ->  Bitmap Index Scan on villages_slug_trgm_idx  (cost=0.00..21.50 rows=2 width=0) (actual time=0.014..0.014 rows=0 loops=1)
+                                 Index Cond: (slug ~~* '%Bayt%'::text)
+                                 Buffers: shared hit=5
+               ->  Hash Join  (cost=880.61..2243.71 rows=1889 width=16) (actual time=7.311..20.556 rows=1993 loops=1)
+                     Hash Cond: (v_1.id = n.village_id)
+                     Buffers: shared hit=1449
+                     ->  Seq Scan on villages v_1  (cost=0.00..1244.14 rows=20014 width=16) (actual time=0.014..9.342 rows=20014 loops=1)
+                           Filter: (deleted_at IS NULL)
+                           Buffers: shared hit=1044
+                     ->  Hash  (cost=857.00..857.00 rows=1889 width=16) (actual time=7.220..7.222 rows=1993 loops=1)
+                           Buckets: 2048  Batches: 1  Memory Usage: 110kB
+                           Buffers: shared hit=405
+                           ->  Bitmap Heap Scan on village_names n  (cost=31.39..857.00 rows=1889 width=16) (actual time=0.872..6.334 rows=1993 loops=1)
+                                 Recheck Cond: (name ~~* '%Bayt%'::text)
+                                 Filter: (deleted_at IS NULL)
+                                 Heap Blocks: exact=399
+                                 Buffers: shared hit=405
+                                 ->  Bitmap Index Scan on village_names_name_trgm_idx  (cost=0.00..30.91 rows=1889 width=0) (actual time=0.771..0.771 rows=1993 loops=1)
+                                       Index Cond: (name ~~* '%Bayt%'::text)
+                                       Buffers: shared hit=6
+ Planning:
+   Buffers: shared hit=392
+ Planning Time: 11.258 ms
+ Execution Time: 24.063 ms
+(44 rows)
+
+
+=== alternate-name search (term: Bayt) - statement 2 of 2 ===
+SELECT v.id FROM (
+	    SELECT v.id FROM villages v
+	    WHERE v.deleted_at IS NULL AND (v.name_ar ILIKE '%Bayt%' OR v.name_en ILIKE '%Bayt%' OR v.slug ILIKE '%Bayt%')
+	    UNION
+	    SELECT v.id FROM village_names n
+	    JOIN villages v ON v.id = n.village_id
+	    WHERE v.deleted_at IS NULL AND n.deleted_at IS NULL AND n.name ILIKE '%Bayt%'
+	  ) AS m
+	      JOIN villages v ON v.id = m.id
+	      ORDER BY v.name_ar ASC , v.id ASC
+	      LIMIT '20' OFFSET '0'
+
+                                                                                        QUERY PLAN                                                                                         
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=3731.11..3731.16 rows=20 width=47) (actual time=30.315..30.329 rows=20 loops=1)
+   Buffers: shared hit=2514
+   ->  Sort  (cost=3731.11..3735.84 rows=1894 width=47) (actual time=30.312..30.323 rows=20 loops=1)
+         Sort Key: v.name_ar, v.id
+         Sort Method: top-N heapsort  Memory: 28kB
+         Buffers: shared hit=2514
+         ->  Hash Join  (cost=2384.02..3680.71 rows=1894 width=47) (actual time=21.625..29.073 rows=1993 loops=1)
+               Hash Cond: (v.id = v_1.id)
+               Buffers: shared hit=2508
+               ->  Seq Scan on villages v  (cost=0.00..1244.14 rows=20014 width=47) (actual time=0.005..2.554 rows=20014 loops=1)
+                     Buffers: shared hit=1044
+               ->  Hash  (cost=2360.35..2360.35 rows=1894 width=16) (actual time=21.559..21.568 rows=1993 loops=1)
+                     Buckets: 2048  Batches: 1  Memory Usage: 110kB
+                     Buffers: shared hit=1464
+                     ->  HashAggregate  (cost=2341.41..2360.35 rows=1894 width=16) (actual time=20.495..20.863 rows=1993 loops=1)
+                           Group Key: v_1.id
+                           Batches: 1  Memory Usage: 241kB
+                           Buffers: shared hit=1464
+                           ->  Append  (cost=64.44..2336.67 rows=1894 width=16) (actual time=6.679..19.450 rows=1993 loops=1)
+                                 Buffers: shared hit=1464
+                                 ->  Bitmap Heap Scan on villages v_1  (cost=64.44..83.49 rows=5 width=16) (actual time=0.099..0.102 rows=0 loops=1)
+                                       Recheck Cond: ((name_ar ~~* '%Bayt%'::text) OR (name_en ~~* '%Bayt%'::text) OR (slug ~~* '%Bayt%'::text))
+                                       Filter: (deleted_at IS NULL)
+                                       Buffers: shared hit=15
+                                       ->  BitmapOr  (cost=64.44..64.44 rows=5 width=0) (actual time=0.097..0.099 rows=0 loops=1)
+                                             Buffers: shared hit=15
+                                             ->  Bitmap Index Scan on villages_name_ar_trgm_idx  (cost=0.00..21.47 rows=2 width=0) (actual time=0.028..0.029 rows=0 loops=1)
+                                                   Index Cond: (name_ar ~~* '%Bayt%'::text)
+                                                   Buffers: shared hit=5
+                                             ->  Bitmap Index Scan on villages_name_en_trgm_idx  (cost=0.00..21.47 rows=2 width=0) (actual time=0.061..0.061 rows=0 loops=1)
+                                                   Index Cond: (name_en ~~* '%Bayt%'::text)
+                                                   Buffers: shared hit=5
+                                             ->  Bitmap Index Scan on villages_slug_trgm_idx  (cost=0.00..21.50 rows=2 width=0) (actual time=0.007..0.007 rows=0 loops=1)
+                                                   Index Cond: (slug ~~* '%Bayt%'::text)
+                                                   Buffers: shared hit=5
+                                 ->  Hash Join  (cost=880.61..2243.71 rows=1889 width=16) (actual time=6.579..19.093 rows=1993 loops=1)
+                                       Hash Cond: (v_2.id = n.village_id)
+                                       Buffers: shared hit=1449
+                                       ->  Seq Scan on villages v_2  (cost=0.00..1244.14 rows=20014 width=16) (actual time=0.010..8.848 rows=20014 loops=1)
+                                             Filter: (deleted_at IS NULL)
+                                             Buffers: shared hit=1044
+                                       ->  Hash  (cost=857.00..857.00 rows=1889 width=16) (actual time=6.495..6.496 rows=1993 loops=1)
+                                             Buckets: 2048  Batches: 1  Memory Usage: 110kB
+                                             Buffers: shared hit=405
+                                             ->  Bitmap Heap Scan on village_names n  (cost=31.39..857.00 rows=1889 width=16) (actual time=0.705..5.664 rows=1993 loops=1)
+                                                   Recheck Cond: (name ~~* '%Bayt%'::text)
+                                                   Filter: (deleted_at IS NULL)
+                                                   Heap Blocks: exact=399
+                                                   Buffers: shared hit=405
+                                                   ->  Bitmap Index Scan on village_names_name_trgm_idx  (cost=0.00..30.91 rows=1889 width=0) (actual time=0.624..0.624 rows=1993 loops=1)
+                                                         Index Cond: (name ~~* '%Bayt%'::text)
+                                                         Buffers: shared hit=6
+ Planning:
+   Buffers: shared hit=391
+ Planning Time: 11.575 ms
+ Execution Time: 32.222 ms
+(56 rows)
+
+
+=== no-match search (term: zzqnomatch) - statement 1 of 2 ===
+SELECT count(*) AS total FROM (
+	    SELECT v.id FROM villages v
+	    WHERE v.deleted_at IS NULL AND (v.name_ar ILIKE '%zzqnomatch%' OR v.name_en ILIKE '%zzqnomatch%' OR v.slug ILIKE '%zzqnomatch%')
+	    UNION
+	    SELECT v.id FROM village_names n
+	    JOIN villages v ON v.id = n.village_id
+	    WHERE v.deleted_at IS NULL AND n.deleted_at IS NULL AND n.name ILIKE '%zzqnomatch%'
+	  ) AS m
+
+                                                                         QUERY PLAN                                                                          
+-------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=354.16..354.17 rows=1 width=8) (actual time=0.392..0.395 rows=1 loops=1)
+   Buffers: shared hit=68
+   ->  HashAggregate  (cost=354.00..354.07 rows=7 width=16) (actual time=0.387..0.390 rows=0 loops=1)
+         Group Key: v.id
+         Batches: 1  Memory Usage: 24kB
+         Buffers: shared hit=68
+         ->  Append  (cost=232.92..353.98 rows=7 width=16) (actual time=0.385..0.388 rows=0 loops=1)
+               Buffers: shared hit=68
+               ->  Bitmap Heap Scan on villages v  (cost=232.92..251.97 rows=5 width=16) (actual time=0.134..0.135 rows=0 loops=1)
+                     Recheck Cond: ((name_ar ~~* '%zzqnomatch%'::text) OR (name_en ~~* '%zzqnomatch%'::text) OR (slug ~~* '%zzqnomatch%'::text))
+                     Filter: (deleted_at IS NULL)
+                     Buffers: shared hit=51
+                     ->  BitmapOr  (cost=232.92..232.92 rows=5 width=0) (actual time=0.132..0.133 rows=0 loops=1)
+                           Buffers: shared hit=51
+                           ->  Bitmap Index Scan on villages_name_ar_trgm_idx  (cost=0.00..77.60 rows=2 width=0) (actual time=0.049..0.049 rows=0 loops=1)
+                                 Index Cond: (name_ar ~~* '%zzqnomatch%'::text)
+                                 Buffers: shared hit=17
+                           ->  Bitmap Index Scan on villages_name_en_trgm_idx  (cost=0.00..81.72 rows=2 width=0) (actual time=0.070..0.070 rows=0 loops=1)
+                                 Index Cond: (name_en ~~* '%zzqnomatch%'::text)
+                                 Buffers: shared hit=17
+                           ->  Bitmap Index Scan on villages_slug_trgm_idx  (cost=0.00..73.60 rows=2 width=0) (actual time=0.013..0.013 rows=0 loops=1)
+                                 Index Cond: (slug ~~* '%zzqnomatch%'::text)
+                                 Buffers: shared hit=17
+               ->  Nested Loop  (cost=77.93..101.98 rows=2 width=16) (actual time=0.250..0.251 rows=0 loops=1)
+                     Buffers: shared hit=17
+                     ->  Bitmap Heap Scan on village_names n  (cost=77.64..85.37 rows=2 width=16) (actual time=0.250..0.250 rows=0 loops=1)
+                           Recheck Cond: (name ~~* '%zzqnomatch%'::text)
+                           Filter: (deleted_at IS NULL)
+                           Buffers: shared hit=17
+                           ->  Bitmap Index Scan on village_names_name_trgm_idx  (cost=0.00..77.64 rows=2 width=0) (actual time=0.248..0.248 rows=0 loops=1)
+                                 Index Cond: (name ~~* '%zzqnomatch%'::text)
+                                 Buffers: shared hit=17
+                     ->  Index Scan using villages_pkey on villages v_1  (cost=0.29..8.30 rows=1 width=16) (never executed)
+                           Index Cond: (id = n.village_id)
+                           Filter: (deleted_at IS NULL)
+ Planning:
+   Buffers: shared hit=392
+ Planning Time: 12.415 ms
+ Execution Time: 1.641 ms
+(39 rows)
+
+
+=== no-match search (term: zzqnomatch) - statement 2 of 2 ===
+SELECT v.id FROM (
+	    SELECT v.id FROM villages v
+	    WHERE v.deleted_at IS NULL AND (v.name_ar ILIKE '%zzqnomatch%' OR v.name_en ILIKE '%zzqnomatch%' OR v.slug ILIKE '%zzqnomatch%')
+	    UNION
+	    SELECT v.id FROM village_names n
+	    JOIN villages v ON v.id = n.village_id
+	    WHERE v.deleted_at IS NULL AND n.deleted_at IS NULL AND n.name ILIKE '%zzqnomatch%'
+	  ) AS m
+	      JOIN villages v ON v.id = m.id
+	      ORDER BY v.name_ar ASC , v.id ASC
+	      LIMIT '20' OFFSET '0'
+
+                                                                               QUERY PLAN                                                                                
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=412.30..412.32 rows=7 width=47) (actual time=0.410..0.413 rows=0 loops=1)
+   Buffers: shared hit=74
+   ->  Sort  (cost=412.30..412.32 rows=7 width=47) (actual time=0.409..0.411 rows=0 loops=1)
+         Sort Key: v.name_ar, v.id
+         Sort Method: quicksort  Memory: 25kB
+         Buffers: shared hit=74
+         ->  Nested Loop  (cost=354.29..412.21 rows=7 width=47) (actual time=0.231..0.233 rows=0 loops=1)
+               Buffers: shared hit=68
+               ->  HashAggregate  (cost=354.00..354.07 rows=7 width=16) (actual time=0.230..0.232 rows=0 loops=1)
+                     Group Key: v_1.id
+                     Batches: 1  Memory Usage: 24kB
+                     Buffers: shared hit=68
+                     ->  Append  (cost=232.92..353.98 rows=7 width=16) (actual time=0.228..0.230 rows=0 loops=1)
+                           Buffers: shared hit=68
+                           ->  Bitmap Heap Scan on villages v_1  (cost=232.92..251.97 rows=5 width=16) (actual time=0.140..0.140 rows=0 loops=1)
+                                 Recheck Cond: ((name_ar ~~* '%zzqnomatch%'::text) OR (name_en ~~* '%zzqnomatch%'::text) OR (slug ~~* '%zzqnomatch%'::text))
+                                 Filter: (deleted_at IS NULL)
+                                 Buffers: shared hit=51
+                                 ->  BitmapOr  (cost=232.92..232.92 rows=5 width=0) (actual time=0.138..0.138 rows=0 loops=1)
+                                       Buffers: shared hit=51
+                                       ->  Bitmap Index Scan on villages_name_ar_trgm_idx  (cost=0.00..77.60 rows=2 width=0) (actual time=0.053..0.053 rows=0 loops=1)
+                                             Index Cond: (name_ar ~~* '%zzqnomatch%'::text)
+                                             Buffers: shared hit=17
+                                       ->  Bitmap Index Scan on villages_name_en_trgm_idx  (cost=0.00..81.72 rows=2 width=0) (actual time=0.067..0.067 rows=0 loops=1)
+                                             Index Cond: (name_en ~~* '%zzqnomatch%'::text)
+                                             Buffers: shared hit=17
+                                       ->  Bitmap Index Scan on villages_slug_trgm_idx  (cost=0.00..73.60 rows=2 width=0) (actual time=0.017..0.017 rows=0 loops=1)
+                                             Index Cond: (slug ~~* '%zzqnomatch%'::text)
+                                             Buffers: shared hit=17
+                           ->  Nested Loop  (cost=77.93..101.98 rows=2 width=16) (actual time=0.087..0.088 rows=0 loops=1)
+                                 Buffers: shared hit=17
+                                 ->  Bitmap Heap Scan on village_names n  (cost=77.64..85.37 rows=2 width=16) (actual time=0.087..0.087 rows=0 loops=1)
+                                       Recheck Cond: (name ~~* '%zzqnomatch%'::text)
+                                       Filter: (deleted_at IS NULL)
+                                       Buffers: shared hit=17
+                                       ->  Bitmap Index Scan on village_names_name_trgm_idx  (cost=0.00..77.64 rows=2 width=0) (actual time=0.086..0.086 rows=0 loops=1)
+                                             Index Cond: (name ~~* '%zzqnomatch%'::text)
+                                             Buffers: shared hit=17
+                                 ->  Index Scan using villages_pkey on villages v_2  (cost=0.29..8.30 rows=1 width=16) (never executed)
+                                       Index Cond: (id = n.village_id)
+                                       Filter: (deleted_at IS NULL)
+               ->  Index Scan using villages_pkey on villages v  (cost=0.29..8.30 rows=1 width=47) (never executed)
+                     Index Cond: (id = v_1.id)
+ Planning:
+   Buffers: shared hit=391
+ Planning Time: 12.211 ms
+ Execution Time: 1.579 ms
+(47 rows)
+
