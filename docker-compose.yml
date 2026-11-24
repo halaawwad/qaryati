@@ -22,6 +22,15 @@ services:
       REFRESH_RATE_LIMIT_MAX: ${REFRESH_RATE_LIMIT_MAX:-30}
       DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?schema=public
       REDIS_URL: redis://redis:6379
+      GEO_ENABLED: "${GEO_ENABLED:-false}"
+      GEO_NOMINATIM_URL: "${GEO_NOMINATIM_URL:-https://nominatim.openstreetmap.org/search}"
+      GEO_USER_AGENT: "${GEO_USER_AGENT:-}"
+      GEO_TIMEOUT_MS: "${GEO_TIMEOUT_MS:-5000}"
+      GEO_CACHE_TTL_SECONDS: "${GEO_CACHE_TTL_SECONDS:-2592000}"
+      GEO_NEGATIVE_TTL_SECONDS: "${GEO_NEGATIVE_TTL_SECONDS:-300}"
+      GEO_CANDIDATE_TTL_SECONDS: "${GEO_CANDIDATE_TTL_SECONDS:-900}"
+      GEO_CIRCUIT_THRESHOLD_PERCENT: "${GEO_CIRCUIT_THRESHOLD_PERCENT:-50}"
+      GEO_CIRCUIT_RESET_MS: "${GEO_CIRCUIT_RESET_MS:-30000}"
     ports:
       - "${APP_HOST_PORT:-3000}:3000"
     depends_on:
@@ -44,7 +53,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
     ports:
-      - "${POSTGRES_HOST_PORT:-5433}:5432"
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5433}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -56,8 +65,11 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "always", "--maxmemory-policy", "noeviction"]
     ports:
-      - "${REDIS_HOST_PORT:-6380}:6379"
+      - "127.0.0.1:${REDIS_HOST_PORT:-6380}:6379"
+    volumes:
+      - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -66,3 +78,4 @@ services:
 
 volumes:
   postgres_data:
+  redis_data:

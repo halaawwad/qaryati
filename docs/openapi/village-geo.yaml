@@ -1,0 +1,254 @@
+openapi: "3.0.3"
+info:
+  title: "Qaryati API - Village Geographic Review"
+  version: "1.0.0"
+  description: >-
+    Individual, authenticated village lookup and manual enrichment. Implemented locally;
+    this document does not assert deployment. Only ADMIN and REVIEWER may use either operation.
+    Lookup uses stored village identity, never caller-supplied search text. Geo integration
+    must be enabled and Redis coordination activated. All responses carry X-Request-Id.
+    The existing error envelope places requestId inside error. Display returned OpenStreetMap
+    attribution near results. Paths already include /api/v1.
+servers:
+  - { url: "/", description: "API origin" }
+tags:
+  - { name: "Village Geo", description: "Reviewed geographic candidates for existing villages" }
+security:
+  - GeoBearerAuth: []
+paths:
+  /api/v1/villages/{id}/geo-candidates:
+    get:
+      tags: ["Village Geo"]
+      operationId: getVillageGeoCandidates
+      summary: "Retrieve geographic candidates for a village"
+      description: >-
+        Requires ADMIN or REVIEWER. Searches the active village's stored Arabic name (English
+        fallback), governorate and ps country scope. Returns at most five candidates; never
+        updates the village. No-match is HTTP 200 with an empty array. Multiple candidates
+        produce ambiguous status. All candidates require manual review, including exact name
+        matches. Positive lookup cache defaults to 30 days; references default to 15 minutes.
+        References bind to this village's identity/version. No query parameters are supported;
+        extra query keys have no effect. Missing/soft-deleted village is 404. A village changed
+        during lookup produces 409. Disabled/unavailable provider, Redis failure or limiter
+        saturation produces 503. Response Cache-Control is no-store.
+      parameters:
+        - { $ref: "#/components/parameters/GeoVillageId" }
+      responses:
+        "200":
+          description: "Candidates requiring explicit manual selection, or no match."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GeoLookupResponse" }
+              examples:
+                noMatch:
+                  summary: "No defensible match; no location is invented"
+                  value:
+                    data:
+                      villageId: "11111111-1111-4111-8111-111111111111"
+                      version: 1
+                      status: no_match
+                      candidates: []
+                      attribution: { text: "© OpenStreetMap contributors", url: "https://www.openstreetmap.org/copyright", licence: "ODbL 1.0" }
+                candidates:
+                  summary: "Synthetic documentation fixture, not verified village coordinates"
+                  value:
+                    data:
+                      villageId: "11111111-1111-4111-8111-111111111111"
+                      version: 1
+                      status: candidates_found
+                      candidates:
+                        - candidateRef: "33333333-3333-4333-8333-333333333333"
+                          expiresAt: "2026-11-23T12:15:00.000Z"
+                          latitude: 31.1234567
+                          longitude: 35.7654321
+                          displayName: "Synthetic documentation fixture"
+                          provider: nominatim
+                          providerReference: "node/123"
+                          address: { country_code: "ps" }
+                          match: { name: unconfirmed, governorate: unconfirmed }
+                      attribution: { text: "© OpenStreetMap contributors", url: "https://www.openstreetmap.org/copyright", licence: "ODbL 1.0" }
+        "400": { $ref: "#/components/responses/GeoBadRequest" }
+        "401": { $ref: "#/components/responses/GeoUnauthorized" }
+        "403": { $ref: "#/components/responses/GeoForbidden" }
+        "404": { $ref: "#/components/responses/GeoNotFound" }
+        "409": { $ref: "#/components/responses/GeoConflict" }
+        "429": { $ref: "#/components/responses/GeoRateLimited" }
+        "500": { $ref: "#/components/responses/GeoInternal" }
+        "503": { $ref: "#/components/responses/GeoUnavailable" }
+  /api/v1/villages/{id}/geo-enrichment:
+    post:
+      tags: ["Village Geo"]
+      operationId: applyVillageGeoEnrichment
+      summary: "Apply an explicitly reviewed geographic candidate"
+      description: >-
+        Requires ADMIN or REVIEWER. Submit a recent server-issued candidateRef from this
+        village's candidate lookup, its returned version, and confirm=true after manual
+        verification. Arbitrary coordinates and unknown/protected fields are rejected.
+        Any existing coordinate (including zero) requires overwriteExisting=true; otherwise
+        409. Missing, expired or foreign candidate references are 400. Stale village/candidate
+        identity or version and replay are 409. Active-row locking, optimistic version checks,
+        geo update and UPDATE audit share one transaction. Audit failure rolls back all
+        changes. Only geo fields, updater, version and updatedAt change. VerificationStatus
+        is preserved, not automatically promoted. Response and audit reflect persisted
+        Decimal(9,6) coordinates. Response Cache-Control is no-store.
+      parameters:
+        - { $ref: "#/components/parameters/GeoVillageId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GeoApplyRequest" }
+            example: { candidateRef: "33333333-3333-4333-8333-333333333333", version: 1, confirm: true, overwriteExisting: false }
+      responses:
+        "200":
+          description: "Committed geographic fields and incremented village version."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GeoApplyResponse" }
+              example:
+                data:
+                  id: "11111111-1111-4111-8111-111111111111"
+                  latitude: 31.123457
+                  longitude: 35.765432
+                  geoDisplayName: "Synthetic documentation fixture"
+                  geoEnrichedAt: "2026-11-23T12:01:00.000Z"
+                  version: 2
+                  verificationStatus: VERIFIED
+                  updatedAt: "2026-11-23T12:01:00.000Z"
+        "400": { $ref: "#/components/responses/GeoBadRequest" }
+        "401": { $ref: "#/components/responses/GeoUnauthorized" }
+        "403": { $ref: "#/components/responses/GeoForbidden" }
+        "404": { $ref: "#/components/responses/GeoNotFound" }
+        "409": { $ref: "#/components/responses/GeoConflict" }
+        "413": { $ref: "#/components/responses/GeoTooLarge" }
+        "429": { $ref: "#/components/responses/GeoRateLimited" }
+        "500": { $ref: "#/components/responses/GeoInternal" }
+        "503": { $ref: "#/components/responses/GeoUnavailable" }
+components:
+  securitySchemes:
+    GeoBearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+  parameters:
+    GeoVillageId:
+      name: id
+      in: path
+      required: true
+      description: "Existing active village UUID; slugs are not accepted on geo operations."
+      schema: { type: string, format: uuid }
+  schemas:
+    GeoApplyRequest:
+      type: object
+      additionalProperties: false
+      required: [candidateRef, version, confirm]
+      properties:
+        candidateRef: { type: string, format: uuid, description: "Server-issued candidate reference, not an OSM ID." }
+        version: { type: integer, minimum: 1, maximum: 2147483646, description: "Current version returned by candidate lookup; no string coercion." }
+        confirm: { type: boolean, enum: [true], description: "Explicit manual verification of the selected location." }
+        overwriteExisting: { type: boolean, default: false, description: "Additional deliberate permission to replace existing coordinates." }
+    GeoAttribution:
+      type: object
+      required: [text, url, licence]
+      properties:
+        text: { type: string, example: "© OpenStreetMap contributors" }
+        url: { type: string, format: uri, example: "https://www.openstreetmap.org/copyright" }
+        licence: { type: string, example: "ODbL 1.0" }
+    GeoCandidate:
+      type: object
+      required: [candidateRef, expiresAt, latitude, longitude, displayName, provider, providerReference, address, match]
+      properties:
+        candidateRef: { type: string, format: uuid }
+        expiresAt: { type: string, format: date-time }
+        latitude: { type: number, minimum: -90, maximum: 90, description: "Candidate precision; persisted coordinate is rounded by Decimal(9,6)." }
+        longitude: { type: number, minimum: -180, maximum: 180 }
+        displayName: { type: string, minLength: 1, maxLength: 2000 }
+        provider: { type: string, minLength: 1, maxLength: 100, example: nominatim }
+        providerReference: { type: string, maxLength: 200, nullable: true, description: "OSM type/id when available; not a confidence score." }
+        address:
+          type: object
+          additionalProperties: { type: string, maxLength: 1000 }
+          description: "Provider-supplied structured address. Keys vary; country_code must match ps for Nominatim candidates."
+        match:
+          type: object
+          required: [name, governorate]
+          properties:
+            name: { type: string, enum: [exact, unconfirmed] }
+            governorate: { type: string, enum: [exact, unconfirmed] }
+    GeoLookupResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [villageId, version, status, candidates, attribution]
+          properties:
+            villageId: { type: string, format: uuid }
+            version: { type: integer, minimum: 1 }
+            status: { type: string, enum: [no_match, candidates_found, ambiguous] }
+            candidates: { type: array, maxItems: 5, items: { $ref: "#/components/schemas/GeoCandidate" } }
+            attribution: { $ref: "#/components/schemas/GeoAttribution" }
+    GeoApplyResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [id, latitude, longitude, geoDisplayName, geoEnrichedAt, version, verificationStatus, updatedAt]
+          properties:
+            id: { type: string, format: uuid }
+            latitude: { type: number, minimum: -90, maximum: 90 }
+            longitude: { type: number, minimum: -180, maximum: 180 }
+            geoDisplayName: { type: string }
+            geoEnrichedAt: { type: string, format: date-time }
+            version: { type: integer, minimum: 2 }
+            verificationStatus: { type: string, enum: [PENDING, VERIFIED, REJECTED], description: "Preserved village-wide status." }
+            updatedAt: { type: string, format: date-time }
+    GeoErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, details, requestId]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            requestId: { type: string }
+            details:
+              type: array
+              items:
+                type: object
+                required: [field, message]
+                properties:
+                  field: { type: string }
+                  message: { type: string }
+            stack: { type: string, description: "Existing shared handler may include a stack for internal errors in development only; Geo provider errors omit it." }
+  responses:
+    GeoBadRequest:
+      description: "400 VALIDATION_ERROR / INVALID_JSON / INVALID_GEO_CANDIDATE. Invalid UUID/body or expired/foreign/unknown candidate."
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/GeoErrorEnvelope" }
+          example: { error: { code: INVALID_GEO_CANDIDATE, message: "Candidate is invalid or expired; retrieve candidates again", details: [], requestId: "geo-request-123" } }
+    GeoUnauthorized:
+      description: "401 UNAUTHORIZED: missing/invalid/expired Bearer token."
+      content: { application/json: { schema: { $ref: "#/components/schemas/GeoErrorEnvelope" } } }
+    GeoForbidden:
+      description: "403 FORBIDDEN: authenticated role is not ADMIN or REVIEWER."
+      content: { application/json: { schema: { $ref: "#/components/schemas/GeoErrorEnvelope" } } }
+    GeoNotFound:
+      description: "404 NOT_FOUND: village does not exist or is soft-deleted."
+      content: { application/json: { schema: { $ref: "#/components/schemas/GeoErrorEnvelope" } } }
+    GeoConflict:
+      description: "409 CONFLICT: stale version/identity, concurrent update, replay, or existing coordinates without explicit overwrite permission."
+      content: { application/json: { schema: { $ref: "#/components/schemas/GeoErrorEnvelope" } } }
+    GeoTooLarge:
+      description: "413 PAYLOAD_TOO_LARGE: shared JSON body limit exceeded."
+      content: { application/json: { schema: { $ref: "#/components/schemas/GeoErrorEnvelope" } } }
+    GeoRateLimited:
+      description: "429 TOO_MANY_REQUESTS: shared API rate limit. Upstream provider throttling instead produces controlled 503 GEO_THROTTLED."
+      content: { application/json: { schema: { $ref: "#/components/schemas/GeoErrorEnvelope" } } }
+    GeoInternal:
+      description: "500 INTERNAL_ERROR: unexpected database/audit/application failure; failed apply transactions are rolled back."
+      content: { application/json: { schema: { $ref: "#/components/schemas/GeoErrorEnvelope" } } }
+    GeoUnavailable:
+      description: "503: GEO_DISABLED, GEO_CONFIGURATION, GEO_BUSY, GEO_CACHE_UNAVAILABLE, GEO_COORDINATION_UNAVAILABLE, GEO_CIRCUIT_OPEN, GEO_THROTTLED, GEO_TIMEOUT, GEO_NETWORK_ERROR, GEO_INVALID_RESPONSE or GEO_PROVIDER_ERROR. Retry later where appropriate; never bypass provider limits."
+      content: { application/json: { schema: { $ref: "#/components/schemas/GeoErrorEnvelope" } } }

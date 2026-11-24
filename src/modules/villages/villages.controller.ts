@@ -1,6 +1,20 @@
 import type { RequestHandler } from 'express';
 import type { ListVillagesQuery, NearbyVillagesQuery, VillageDetailsParams } from './villages.schemas.js';
 import { villageService } from './villages.service.js';
+import { villageGeoService } from './villages.geo.service.js';
+
+export const geoCandidates: RequestHandler = async (req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  try { res.status(200).json({ data: await villageGeoService.candidates(req.params.id as string) }); }
+  catch (error) { next(error); }
+};
+export const applyGeoEnrichment: RequestHandler = async (req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  try {
+    const data = await villageGeoService.apply(req.params.id as string, req.body, { actorId: req.user.id, requestId: req.requestId });
+    res.status(200).json({ data });
+  } catch (error) { next(error); }
+};
 
 export const list: RequestHandler = async (req, res, next) => {
   try {

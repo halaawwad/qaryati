@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { geoEnvShape, validGeoUserAgent } from '../integrations/geo/geo.config.js';
 
 const booleanEnv = z.enum(['true', 'false']).transform((value) => value === 'true');
 // Keep window durations within Node's timer range (also used by the test memory store).
@@ -6,6 +7,7 @@ const windowMinutesEnv = z.coerce.number().int().positive().max(35791);
 const rateLimitMaxEnv = z.coerce.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 
 const envSchema = z.object({
+  ...geoEnvShape,
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   LOG_LEVEL: z
@@ -40,6 +42,8 @@ const envSchema = z.object({
         .map((origin) => origin.trim())
         .filter(Boolean),
     ),
+}).refine(value => !value.GEO_ENABLED || validGeoUserAgent(value.GEO_USER_AGENT), {
+  path: ['GEO_USER_AGENT'], message: 'Enabled geo lookup requires an application/version User-Agent with real contact URL or email',
 });
 
 export type Env = z.infer<typeof envSchema>;
