@@ -1,0 +1,278 @@
+openapi: "3.0.3"
+info:
+  title: Qaryati API - Population Records
+  version: "1.0.0"
+  description: Population record read, create, and update endpoints. Paths include the API prefix.
+servers:
+  - url: /
+paths:
+  /api/v1/villages/{villageId}/population-records:
+    post:
+      operationId: createVillagePopulationRecord
+      summary: Create a population record
+      description: >-
+        Requires an EDITOR, REVIEWER or ADMIN bearer token. The village and source
+        must be active; any source verification status is accepted. A new record is
+        PENDING, version 1 and not preferred. Duplicate village/year/source records,
+        including soft-deleted records, produce a conflict. Creation and audit logging
+        are atomic. Reference date need not match the reference year. needsReview is
+        calculated by comparing population with the non-deleted VERIFIED record for
+        the village with the highest reference year (ties use ascending record ID).
+        A difference greater than 50% is flagged; no baseline means false. An invalid
+        non-positive baseline is flagged for review.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: villageId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreatePopulationRecord' }
+      responses:
+        '201':
+          description: Population record created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/PopulationRecord' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+        '500': { $ref: '#/components/responses/Error' }
+    get:
+      operationId: listVillagePopulationRecords
+      summary: List population records for a village
+      description: >-
+        Returns active records for an active village, including records whose source is
+        soft-deleted and records of all verification statuses. Unknown query keys are
+        ignored. A valid page beyond the last result returns an empty array. An
+        effective pagination offset exceeding 2147483647 returns HTTP 400. The
+        count and page are read from the same database snapshot.
+      security: []
+      parameters:
+        - name: villageId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: limit
+          in: query
+          description: Values above 100 are capped at 100.
+          schema: { type: integer, minimum: 1, default: 20 }
+        - name: referenceYear
+          in: query
+          description: Signed 32-bit exact-match read filter; this is not the valid range for writing population records (1800–2100).
+          schema: { type: integer, format: int32 }
+        - name: sourceId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: isEstimate
+          in: query
+          schema: { type: string, enum: ["true", "false"] }
+        - name: isPreferred
+          in: query
+          schema: { type: string, enum: ["true", "false"] }
+        - name: needsReview
+          in: query
+          schema: { type: string, enum: ["true", "false"] }
+        - name: verificationStatus
+          in: query
+          schema: { $ref: '#/components/schemas/VerificationStatus' }
+        - name: sort
+          in: query
+          description: ID ascending is appended as a stable tie-breaker.
+          schema: { type: string, enum: [referenceYear, population, createdAt, updatedAt], default: referenceYear }
+        - name: order
+          in: query
+          schema: { type: string, enum: [asc, desc], default: desc }
+      responses:
+        '200':
+          description: Page of population records.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/PopulationRecord' }
+                  meta: { $ref: '#/components/schemas/PaginationMeta' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/Error' }
+        '500': { $ref: '#/components/responses/Error' }
+  /api/v1/population-records/{id}:
+    patch:
+      operationId: updatePopulationRecord
+      summary: Update a population record
+      description: >-
+        EDITOR may edit their own PENDING records; REVIEWER and ADMIN may edit
+        PENDING or VERIFIED records. VERIFIED status is preserved. Direct edits to
+        REJECTED records are provisionally prohibited. An unchanged deleted source may be retained; a replacement source
+        must be active. Record authorization is checked before a missing or deleted
+        replacement source is reported. Matching no-ops do not increment version or create an audit.
+        Other changes and their audit are atomic. Conflicts include stale versions,
+        concurrent changes, and positively identified uniqueness conflicts. Provisionally,
+        changing population compares it with the latest other non-deleted VERIFIED record
+        for the village using the CREATE threshold; a flag once set remains set. With no
+        baseline no new flag is raised; an invalid baseline raises it. Year-only and
+        other edits preserve the flag. Clients cannot set needsReview through PATCH.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdatePopulationRecord' }
+      responses:
+        '200':
+          description: Updated or unchanged population record.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/PopulationRecord' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+        '500': { $ref: '#/components/responses/Error' }
+    get:
+      operationId: getPopulationRecord
+      summary: Get a population record
+      description: Returns an active record belonging to an active village, regardless of source deletion or verification status.
+      security: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Population record.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/PopulationRecord' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/Error' }
+        '500': { $ref: '#/components/responses/Error' }
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+  schemas:
+    UpdatePopulationRecord:
+      type: object
+      additionalProperties: false
+      required: [expectedVersion]
+      minProperties: 2
+      properties:
+        expectedVersion: { type: integer, minimum: 1, maximum: 2147483647 }
+        population: { type: integer, minimum: 1, maximum: 2147483647 }
+        referenceYear: { type: integer, minimum: 1800, maximum: 2100 }
+        sourceId: { type: string, format: uuid }
+        referenceDate: { type: string, format: date-time, nullable: true }
+        isEstimate: { type: boolean }
+        notes: { type: string, maxLength: 5000, nullable: true, description: Trimmed before length validation. }
+    CreatePopulationRecord:
+      type: object
+      additionalProperties: false
+      required: [population, referenceYear, sourceId]
+      properties:
+        population: { type: integer, minimum: 1, maximum: 2147483647 }
+        referenceYear: { type: integer, minimum: 1800, maximum: 2100 }
+        sourceId: { type: string, format: uuid }
+        referenceDate: { type: string, format: date-time, nullable: true }
+        isEstimate: { type: boolean, default: false }
+        notes: { type: string, maxLength: 5000, nullable: true, description: Trimmed before length validation. }
+    VerificationStatus:
+      type: string
+      enum: [PENDING, VERIFIED, REJECTED]
+    PopulationRecord:
+      type: object
+      required: [id, villageId, population, referenceYear, referenceDate, sourceId, isEstimate, isPreferred, needsReview, notes, verificationStatus, version, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        villageId: { type: string, format: uuid }
+        population: { type: integer, format: int32 }
+        referenceYear: { type: integer, format: int32 }
+        referenceDate: { type: string, format: date-time, nullable: true }
+        sourceId: { type: string, format: uuid, description: Retained even when the source is soft-deleted. }
+        isEstimate: { type: boolean }
+        isPreferred: { type: boolean }
+        needsReview: { type: boolean }
+        notes: { type: string, nullable: true }
+        verificationStatus: { $ref: '#/components/schemas/VerificationStatus' }
+        version: { type: integer }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    PaginationMeta:
+      type: object
+      required: [page, limit, total, totalPages, hasNextPage, hasPrevPage]
+      properties:
+        page: { type: integer }
+        limit: { type: integer }
+        total: { type: integer }
+        totalPages: { type: integer }
+        hasNextPage: { type: boolean }
+        hasPrevPage: { type: boolean }
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, details, requestId]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            details:
+              type: array
+              items:
+                type: object
+                properties:
+                  field: { type: string }
+                  message: { type: string }
+            requestId: { type: string }
+  responses:
+    ValidationError:
+      description: Invalid path or query parameters.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    NotFound:
+      description: Village, source, or record is missing or soft-deleted, or the record belongs to a soft-deleted village.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    Error:
+      description: Authentication, authorization, conflict, rate limit, or unexpected application error.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
