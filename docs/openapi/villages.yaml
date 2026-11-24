@@ -1,0 +1,1226 @@
+openapi: 3.0.3
+info:
+  title: Qaryati API - Villages
+  version: 1.0.0
+  description: |
+    Villages: public search and read endpoints, nearby places, and the write endpoints used by
+    editors and reviewers (create, update, verify, reject, delete), plus a village's alternate
+    names and nearby places.
+
+    ## Availability
+    All the endpoints on this page are on `main`: the read endpoints (list, details, nearby), the village
+    write endpoints (pull request #31), and the alternate-name and nearby-place write endpoints
+    (pull request #38). See `x-implementation-source`.
+
+    ## Authentication and roles
+    The three `GET` endpoints are public. Every write endpoint needs `Authorization: Bearer <accessToken>`
+    (see the authentication file) and a role:
+
+    | Endpoint | Roles |
+    |---|---|
+    | `POST /villages` | `EDITOR`, `REVIEWER`, `ADMIN` |
+    | `PATCH /villages/{id}` | `REVIEWER` and `ADMIN` for any village; `EDITOR` only for a village they created that is still `PENDING` (see the endpoint) |
+    | `POST /villages/{id}/verify`, `POST /villages/{id}/reject` | `REVIEWER`, `ADMIN` |
+    | `DELETE /villages/{id}` | `ADMIN` |
+    | `POST /villages/{id}/names` | `EDITOR`, `REVIEWER`, `ADMIN` |
+    | `PATCH /villages/{id}/names/{nameId}` | `REVIEWER` and `ADMIN` for any name; `EDITOR` only for a name they created that is still `PENDING` (see the endpoint) |
+    | `DELETE /villages/{id}/names/{nameId}` | `ADMIN` |
+    | `POST /villages/{id}/nearby` | `EDITOR`, `REVIEWER`, `ADMIN` |
+    | `DELETE /villages/{id}/nearby/{relationId}` | `ADMIN` |
+
+    ## Optimistic locking
+    Every village and every alternate name has an integer `version`, starting at 1. A client that
+    changes one sends the `version` it last read in the request body. If the stored version is
+    different, the request fails with 409 `VERSION_CONFLICT` and the details name the current version;
+    nothing is written. Every successful change (update, verify, reject) increments `version`, and
+    every edit sends the village (or name) back to `PENDING` for review. Deleting does not take a
+    version and does not increment it.
+
+    ## Audit
+    Every successful write is recorded in the audit log in the same database transaction as the change
+    (`entityType` `village`, `village_name` or `nearby_place`), with the actor, the request id, and the
+    full `before` and `after` snapshots. A rejected request writes nothing.
+
+    ## Deleted villages
+    A village is soft-deleted (`deletedAt`). It disappears from every read and from the nearby lists, and
+    any write on it returns 404. Alternate names are soft-deleted too; nearby places are removed for good,
+    with the full row kept in the audit log.
+
+    ## Errors
+    Every error uses the same envelope (`ErrorResponse`) with a machine-readable `code` and the request's
+    `requestId` (also returned in the `X-Request-Id` header). Requests over the rate limit return 429.
+servers:
+  - url: http://localhost:3000/api/v1
+    description: Local Docker (docker compose up)
+x-implementation-source:
+  reads: { ref: main, module: src/modules/villages/ }
+  writes: { ref: main, pullRequest: 31, mergeCommit: a126546, tests: 'tests/villages.writes.test.ts, tests/villages.repository.test.ts' }
+  relations: { ref: main, pullRequest: 38, mergeCommit: f2b6e88, tests: 'tests/village-relations.test.ts, tests/village-relations.routes.test.ts' }
+tags:
+  - name: Villages
+    description: Public search and details.
+  - name: Nearby
+    description: Places near a village, recorded or computed by distance.
+  - name: Village writes
+    description: Create, update, verify, reject and delete (roles required).
+  - name: Alternate names
+    description: Former, historical and alternate spellings of a village's name.
+  - name: Nearby places
+    description: Writes on the recorded nearby places of a village.
+
+paths:
+  /villages:
+    get:
+      tags: [Villages]
+      summary: List and search villages
+      operationId: listVillages
+      description: |
+        A paginated list of active villages. All verification statuses are public.
+
+        - **Search:** `search` is a case-insensitive "contains" match on the Arabic name, the English name,
+          the slug and the alternate names (`village_names`). It is trimmed, at most 100 characters, and blank
+          text is ignored. The term is matched literally: `\`, `%` and `_` in it are escaped, so `search=%` finds
+          names that contain a percent sign (not every village) and `bei_` does not match `beit`.
+        - **Filters** combine with AND. A filter value that matches nothing returns an empty page, not an error.
+        - **Sort:** by `sort` and `order` (default `nameAr` ascending). The village id ascending is always
+          added as a tie-breaker, so pages are stable. A missing value in `nameEn`, `elevationM` or
+          `areaDunums` sorts last in either direction.
+        - **Pagination:** `limit` above 100 is accepted and capped at 100. A page beyond the results returns an
+          empty `data` array with the usual `meta`. Unknown query keys are ignored.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+        - name: search
+          in: query
+          description: Text to look for in names, slug and alternate names (max 100 characters).
+          schema: { type: string, maxLength: 100 }
+          example: بيت
+        - name: governorateId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: localAuthorityId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: verificationStatus
+          in: query
+          schema: { $ref: '#/components/schemas/VerificationStatus' }
+        - name: sort
+          in: query
+          schema: { type: string, enum: [nameAr, nameEn, createdAt, elevationM, areaDunums], default: nameAr }
+        - name: order
+          in: query
+          schema: { type: string, enum: [asc, desc], default: asc }
+      responses:
+        '200':
+          description: A page of villages.
+          headers:
+            X-Request-Id: { $ref: '#/components/headers/RequestId' }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/VillageListItem' }
+                  meta: { $ref: '#/components/schemas/PaginationMeta' }
+              example:
+                data:
+                  - id: 5b1f6f0e-3a39-4a0e-9d5c-2f6d3f1f7a10
+                    slug: beita
+                    nameAr: بيتا
+                    nameEn: Beita
+                    latitude: 32.1558
+                    longitude: 35.2849
+                    verificationStatus: VERIFIED
+                    governorate: { id: 01000000-0000-4000-8000-000000000004, nameAr: نابلس, nameEn: Nablus }
+                    localAuthority: { id: 9c2a8f4e-0b6e-4c53-8d2e-6b1a1d0f4c77, nameAr: بلدية بيتا }
+                meta: { page: 1, limit: 20, total: 1, totalPages: 1, hasNextPage: false, hasPrevPage: false }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    post:
+      tags: [Village writes]
+      summary: Create a village
+      operationId: createVillage
+      description: |
+        Creates a village with `verificationStatus` `PENDING` and `version` 1; `createdById` is the caller.
+        Returns the new village as in the details endpoint.
+
+        - The body is strict: server-owned fields (`id`, `verificationStatus`, `version`, `createdById`,
+          `updatedById`, `deletedAt`, `geoDisplayName`, `geoEnrichedAt`) are rejected with 400.
+        - `latitude` and `longitude` must be sent together (both numbers or both `null`).
+        - `localAuthorityId`, if given, must belong to the village's governorate.
+        - `nameOrigin` needs a `nameOriginSourceId` ("no fact without a source"), and that source must exist
+          and not be deleted.
+        - The slug and the PCBS code are unique across all villages, including deleted ones.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateVillageRequest' }
+            example:
+              slug: beita
+              nameAr: بيتا
+              nameEn: Beita
+              governorateId: 01000000-0000-4000-8000-000000000004
+              latitude: 32.1558
+              longitude: 35.2849
+      responses:
+        '201':
+          description: The village was created.
+          headers:
+            X-Request-Id: { $ref: '#/components/headers/RequestId' }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/VillageDetails' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: The slug or the PCBS code is already used (`SLUG_TAKEN`, `PCBS_CODE_TAKEN`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              example:
+                error:
+                  code: SLUG_TAKEN
+                  message: Another village already uses this slug
+                  details: [{ field: slug, message: Slug is already taken }]
+                  requestId: 4d2c-example
+        '422': { $ref: '#/components/responses/VillageRuleViolation' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /villages/{idOrSlug}:
+    get:
+      tags: [Villages]
+      summary: Get a village
+      operationId: getVillage
+      description: |
+        The village with its governorate, local authority, name-origin source and active alternate names
+        (sorted by name). `idOrSlug` is a UUID or a slug: a UUID-shaped value is looked up as an id, anything
+        else as a slug. An unknown or deleted village returns 404. A deleted source is reported as `null`.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/VillageIdOrSlug'
+      responses:
+        '200':
+          description: The village.
+          headers:
+            X-Request-Id: { $ref: '#/components/headers/RequestId' }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/VillageDetails' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '404': { $ref: '#/components/responses/VillageNotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    patch:
+      tags: [Village writes]
+      summary: Update a village
+      operationId: updateVillage
+      description: |
+        Changes some fields of a village. The body must contain the `version` the client last read and at
+        least one field to change. On success the village gets `version + 1`, goes back to `PENDING`, and
+        `updatedById` is the caller.
+
+        **Who may edit.** The role is checked after the village is loaded and before the version is compared,
+        so the order of the answers is 404, then 403, then 409. A refused request writes nothing: no change, no
+        audit row, and the `version` stays as it was.
+
+        - `REVIEWER` and `ADMIN` may edit any village, whatever its status.
+        - An `EDITOR` may edit a village only if they created it **and** it is still `PENDING`. Someone else's
+          `PENDING` village is 403 `VILLAGE_EDIT_FORBIDDEN`. A `VERIFIED` or `REJECTED` village, whoever created
+          it, is 403 `CHANGE_REQUEST_REQUIRED`: the change has to be submitted as a change request.
+        - A village without a recorded creator (for example seeded data) cannot be edited by an `EDITOR`.
+
+        **Other rules.**
+
+        - A stale `version` returns 409 `VERSION_CONFLICT` (the details give the current version).
+        - The consistency rules (local authority in the governorate, name origin with a source, coordinates
+          together) apply to the final state, so a field missing from the body keeps its stored value. Moving
+          a village to another governorate while it keeps a local authority of the old one is rejected.
+        - The same strict body as on create, except that `slug`, `nameAr` and `governorateId` are optional.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/VillageUuid'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateVillageRequest' }
+            example: { version: 1, nameEn: Beita, elevationM: 560 }
+      responses:
+        '200':
+          description: The updated village.
+          headers:
+            X-Request-Id: { $ref: '#/components/headers/RequestId' }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/VillageDetails' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: |
+            The caller may not edit this village. `code` is `FORBIDDEN` (the role is not allowed on this
+            endpoint), `VILLAGE_EDIT_FORBIDDEN` (an editor and a `PENDING` village created by someone else) or
+            `CHANGE_REQUEST_REQUIRED` (an editor and a `VERIFIED` or `REJECTED` village). Nothing was written.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              examples:
+                notYours:
+                  summary: An editor and a village created by someone else
+                  value:
+                    error:
+                      code: VILLAGE_EDIT_FORBIDDEN
+                      message: You can only edit villages that you created
+                      details: [{ field: id, message: This village was created by someone else }]
+                      requestId: 3a7d-example
+                changeRequest:
+                  summary: An editor and a VERIFIED or REJECTED village
+                  value:
+                    error:
+                      code: CHANGE_REQUEST_REQUIRED
+                      message: A VERIFIED village cannot be edited directly; submit the change as a change request
+                      details: [{ field: verificationStatus, message: The village is VERIFIED }]
+                      requestId: 5e2b-example
+        '404': { $ref: '#/components/responses/VillageNotFound' }
+        '409':
+          description: A stale `version` (`VERSION_CONFLICT`), or the slug or PCBS code is already used (`SLUG_TAKEN`, `PCBS_CODE_TAKEN`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              example:
+                error:
+                  code: VERSION_CONFLICT
+                  message: The village was changed by someone else; reload it and retry
+                  details: [{ field: version, message: Current version is 3 }]
+                  requestId: 8a3b-example
+        '422': { $ref: '#/components/responses/VillageRuleViolation' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    delete:
+      tags: [Village writes]
+      summary: Delete a village (soft delete)
+      operationId: deleteVillage
+      description: |
+        Sets `deletedAt`. The row stays for history but disappears from every read. Takes no `version` and does
+        not change it. Afterwards `GET`, `PATCH`, `verify`, `reject` and a second `DELETE` return 404. The slug
+        and PCBS code of a deleted village stay taken.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/VillageUuid'
+      responses:
+        '204': { description: The village was deleted (no content). }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/VillageNotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /villages/{idOrSlug}/nearby:
+    get:
+      tags: [Nearby]
+      summary: Nearby places of a village
+      operationId: getVillageNearby
+      description: |
+        Two modes, with different response shapes. Neither is paginated, so neither has `meta`.
+
+        - **Without `radiusKm`:** the places recorded for the village, in both directions: a relation stored
+          on this village, or stored on another village that points back here. Ordered by distance (unknown
+          distances last), then id. A relation to a deleted village keeps its place name but has `village: null`.
+          Relations recorded by a deleted village are left out.
+        - **With `radiusKm`** (greater than 0, at most 50): the active villages with coordinates within that
+          distance, nearest first, as `VillageWithinRadius` (great-circle distance, rounded to two decimals).
+          The village itself is excluded. If the village has no coordinates, the answer is 422
+          `VILLAGE_HAS_NO_COORDINATES`.
+
+        An unknown or deleted village returns 404. Unknown query keys are ignored.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/VillageIdOrSlug'
+        - name: radiusKm
+          in: query
+          description: Search radius in kilometres. Greater than 0 and at most 50.
+          schema: { type: number, minimum: 0, exclusiveMinimum: true, maximum: 50 }
+          example: 10
+      responses:
+        '200':
+          description: Recorded places (without `radiusKm`) or villages within the radius (with it).
+          headers:
+            X-Request-Id: { $ref: '#/components/headers/RequestId' }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    oneOf:
+                      - type: array
+                        items: { $ref: '#/components/schemas/NearbyPlace' }
+                      - type: array
+                        items: { $ref: '#/components/schemas/VillageWithinRadius' }
+              examples:
+                recorded:
+                  summary: Without radiusKm
+                  value:
+                    data:
+                      - placeName: حوارة
+                        placeType: VILLAGE
+                        relation: ADJACENT
+                        distanceKm: 3
+                        village: { id: 7a1c1b0e-52c9-4d7e-9a3e-0a6f6d9e2b11, slug: huwwara, nameAr: حوارة, nameEn: Huwwara }
+                      - placeName: نابلس
+                        placeType: CITY
+                        relation: NEARBY
+                        distanceKm: null
+                        village: null
+                withRadius:
+                  summary: With radiusKm=10
+                  value:
+                    data:
+                      - { id: 7a1c1b0e-52c9-4d7e-9a3e-0a6f6d9e2b11, slug: huwwara, nameAr: حوارة, nameEn: Huwwara, distanceKm: 3.12 }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '404': { $ref: '#/components/responses/VillageNotFound' }
+        '422':
+          description: '`radiusKm` was given but the village has no coordinates yet (`VILLAGE_HAS_NO_COORDINATES`).'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              example:
+                error:
+                  code: VILLAGE_HAS_NO_COORDINATES
+                  message: This village has no coordinates yet, so nearby villages cannot be calculated by distance
+                  details: []
+                  requestId: 6e1f-example
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    post:
+      tags: [Nearby places]
+      summary: Record a nearby place
+      operationId: addNearbyPlace
+      description: |
+        Records a place that is near or adjacent to the village. The body has one of two shapes; a body that
+        mixes both is rejected with 400.
+
+        - **A village we have:** `relatedVillageId` and `relation`. The place name is set to that village's
+          Arabic name and `placeType` to `VILLAGE`.
+        - **A place we have no row for:** `placeName`, `placeType` and `relation`.
+
+        `distanceKm`, if given, must be greater than 0. Nearby places have no `version` and no source.
+
+        - A village related to itself returns 422 `NEARBY_SELF_RELATION`.
+        - The related village must exist and not be deleted (422 `RELATED_VILLAGE_NOT_FOUND`).
+        - A pair is stored once, whichever village it was recorded from: recording B for A when A is already
+          recorded for B returns 409 `NEARBY_RELATION_EXISTS`.
+        - The same `placeName` for the same village returns 409 `NEARBY_PLACE_NAME_EXISTS`.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/VillageUuid'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateNearbyPlaceRequest' }
+            examples:
+              village:
+                summary: A village we have
+                value: { relatedVillageId: 7a1c1b0e-52c9-4d7e-9a3e-0a6f6d9e2b11, relation: ADJACENT, distanceKm: 3 }
+              place:
+                summary: A place we have no row for
+                value: { placeName: نابلس, placeType: CITY, relation: NEARBY }
+      responses:
+        '201':
+          description: The nearby place was recorded.
+          headers:
+            X-Request-Id: { $ref: '#/components/headers/RequestId' }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/NearbyPlaceRecord' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/VillageNotFound' }
+        '409':
+          description: The pair is already related (`NEARBY_RELATION_EXISTS`) or the place name is already used (`NEARBY_PLACE_NAME_EXISTS`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              example:
+                error:
+                  code: NEARBY_RELATION_EXISTS
+                  message: These two villages are already related
+                  details: [{ field: relatedVillageId, message: A relation between these villages already exists (in either direction) }]
+                  requestId: 3f6a-example
+        '422':
+          description: A village related to itself (`NEARBY_SELF_RELATION`) or an unknown or deleted related village (`RELATED_VILLAGE_NOT_FOUND`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /villages/{id}/verify:
+    post:
+      tags: [Village writes]
+      summary: Verify a village
+      operationId: verifyVillage
+      description: |
+        Sets `verificationStatus` to `VERIFIED`. It is a change like any other: `version` is incremented, so an
+        editor still holding the old version gets a 409 instead of silently editing a village that was just
+        reviewed. A stale `version` returns 409 `VERSION_CONFLICT`.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/VillageId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/VillageVersionRequest' }
+            example: { version: 2 }
+      responses:
+        '200':
+          description: The verified village.
+          headers:
+            X-Request-Id: { $ref: '#/components/headers/RequestId' }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/VillageDetails' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/VillageNotFound' }
+        '409': { $ref: '#/components/responses/VersionConflict' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /villages/{id}/reject:
+    post:
+      tags: [Village writes]
+      summary: Reject a village
+      operationId: rejectVillage
+      description: Sets `verificationStatus` to `REJECTED`, with the same locking rules as `verify`.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/VillageId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/VillageVersionRequest' }
+            example: { version: 2 }
+      responses:
+        '200':
+          description: The rejected village.
+          headers:
+            X-Request-Id: { $ref: '#/components/headers/RequestId' }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/VillageDetails' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/VillageNotFound' }
+        '409': { $ref: '#/components/responses/VersionConflict' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /villages/{id}/names:
+    post:
+      tags: [Alternate names]
+      summary: Add an alternate name
+      operationId: addVillageName
+      description: |
+        Adds a former, historical, alternate or transliterated name. The name starts as `PENDING` with `version` 1.
+
+        - `language` is `ar` or `en`.
+        - `periodFrom` must not be after `periodTo`.
+        - `sourceId`, if given, must be an existing, non-deleted source (422 `SOURCE_NOT_FOUND`).
+        - The same name in the same language for the same village (case-insensitive, among non-deleted names)
+          returns 409 `VILLAGE_NAME_EXISTS`. This check is made inside the transaction but is not race-proof:
+          two requests adding the same name at the same moment can both succeed.
+        - A missing or deleted village returns 404.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/VillageId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateVillageNameRequest' }
+            example: { name: Bayta, language: en, nameType: TRANSLITERATION }
+      responses:
+        '201':
+          description: The alternate name was added.
+          headers:
+            X-Request-Id: { $ref: '#/components/headers/RequestId' }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/VillageNameRecord' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/VillageNotFound' }
+        '409': { $ref: '#/components/responses/NameConflict' }
+        '422': { $ref: '#/components/responses/SourceNotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /villages/{id}/names/{nameId}:
+    patch:
+      tags: [Alternate names]
+      summary: Update an alternate name
+      operationId: updateVillageName
+      description: |
+        Changes some fields of a name. The body needs the `version` the client last read and at least one
+        field. On success the name gets `version + 1` and goes back to `PENDING`. The period check uses the stored
+        value for an end the body does not send. A name that belongs to another village, or that is deleted,
+        is reported exactly like a missing one (404 `Village name not found`).
+
+        **Who may edit.** The same rule as for a village. It is checked after the name is loaded and before the
+        version is compared, so the order of the answers is 404, then 403, then 409. A refused request writes
+        nothing: no change, no audit row, and the `version` stays as it was.
+
+        - `REVIEWER` and `ADMIN` may edit any name, whatever its status.
+        - An `EDITOR` may edit a name only if they created it **and** it is still `PENDING`. Someone else's
+          `PENDING` name is 403 `VILLAGE_EDIT_FORBIDDEN`. A `VERIFIED` or `REJECTED` name, whoever created it,
+          is 403 `CHANGE_REQUEST_REQUIRED`: the change has to be submitted as a change request.
+        - A name without a recorded creator cannot be edited by an `EDITOR`.
+
+        Adding a name (`POST`) is not subject to this rule: a new name starts as `PENDING` and waits for review,
+        also on a `VERIFIED` village.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/VillageId'
+        - $ref: '#/components/parameters/NameId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateVillageNameRequest' }
+            example: { version: 1, periodFrom: 1900 }
+      responses:
+        '200':
+          description: The updated name.
+          headers:
+            X-Request-Id: { $ref: '#/components/headers/RequestId' }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/VillageNameRecord' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: |
+            The caller may not edit this name. `code` is `FORBIDDEN` (the role is not allowed on this endpoint),
+            `VILLAGE_EDIT_FORBIDDEN` (an editor and a `PENDING` name created by someone else) or
+            `CHANGE_REQUEST_REQUIRED` (an editor and a `VERIFIED` or `REJECTED` name). Nothing was written.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              examples:
+                notYours:
+                  summary: An editor and a name created by someone else
+                  value:
+                    error:
+                      code: VILLAGE_EDIT_FORBIDDEN
+                      message: You can only edit alternate names that you created
+                      details: [{ field: id, message: This alternate name was created by someone else }]
+                      requestId: 6b1c-example
+                changeRequest:
+                  summary: An editor and a VERIFIED or REJECTED name
+                  value:
+                    error:
+                      code: CHANGE_REQUEST_REQUIRED
+                      message: A VERIFIED alternate name cannot be edited directly; submit the change as a change request
+                      details: [{ field: verificationStatus, message: The alternate name is VERIFIED }]
+                      requestId: 8d4f-example
+        '404':
+          description: The village or the name does not exist, is deleted, or the name belongs to another village (`NOT_FOUND`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              example:
+                error: { code: NOT_FOUND, message: Village name not found, details: [], requestId: 2b7e-example }
+        '409':
+          description: A stale `version` (`VERSION_CONFLICT`), or the name already exists in that language (`VILLAGE_NAME_EXISTS`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              example:
+                error:
+                  code: VERSION_CONFLICT
+                  message: The village name was changed by someone else; reload it and retry
+                  details: [{ field: version, message: Current version is 2 }]
+                  requestId: 5c9d-example
+        '422': { $ref: '#/components/responses/SourceNotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    delete:
+      tags: [Alternate names]
+      summary: Delete an alternate name (soft delete)
+      operationId: deleteVillageName
+      description: |
+        Only an `ADMIN` may delete a name; a `REVIEWER` or an `EDITOR` gets 403 `FORBIDDEN`. Sets `deletedAt` on
+        the name; it disappears from the village details and from the search. Takes no `version`. A second
+        delete, or a name of another village, returns 404.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/VillageId'
+        - $ref: '#/components/parameters/NameId'
+      responses:
+        '204': { description: The name was deleted (no content). }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: The village or the name does not exist (`NOT_FOUND`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /villages/{id}/nearby/{relationId}:
+    delete:
+      tags: [Nearby places]
+      summary: Remove a nearby place
+      operationId: removeNearbyPlace
+      description: |
+        Only an `ADMIN` may remove a nearby place; a `REVIEWER` or an `EDITOR` gets 403 `FORBIDDEN`.
+
+        Hard delete: the row is removed. The audit log keeps the full row as `before` (and `after` is `null`),
+        so a removed relation can be restored from the log. The relation may be removed from either side: it
+        must involve the village in the URL as the village or the related village, otherwise 404
+        `Nearby relation not found`.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/VillageId'
+        - name: relationId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: The nearby place was removed (no content). }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: The village, or a relation that involves it, does not exist (`NOT_FOUND`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              example:
+                error: { code: NOT_FOUND, message: Nearby relation not found, details: [], requestId: 9d4e-example }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Access token from /auth/login or /auth/refresh.
+
+  headers:
+    RequestId:
+      description: Request correlation id (also in the `requestId` of an error body).
+      schema: { type: string }
+
+  parameters:
+    Page:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 1, default: 1 }
+    Limit:
+      name: limit
+      in: query
+      description: Page size, capped at 100.
+      schema: { type: integer, minimum: 1, default: 20 }
+    VillageIdOrSlug:
+      name: idOrSlug
+      in: path
+      required: true
+      description: A village UUID or slug. A UUID-shaped value is looked up as an id, anything else as a slug.
+      schema: { type: string, minLength: 1, maxLength: 200 }
+      example: beita
+    VillageUuid:
+      name: idOrSlug
+      in: path
+      required: true
+      description: The village UUID. Unlike the read endpoints, a slug is not accepted here.
+      schema: { type: string, format: uuid }
+    VillageId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    NameId:
+      name: nameId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+
+  schemas:
+    VerificationStatus:
+      type: string
+      enum: [PENDING, VERIFIED, REJECTED]
+    VillageNameType:
+      type: string
+      enum: [FORMER, HISTORICAL, ALT_SPELLING, TRANSLITERATION]
+    PlaceType:
+      type: string
+      enum: [VILLAGE, CITY]
+    PlaceRelation:
+      type: string
+      enum: [NEARBY, ADJACENT]
+    LocalAuthorityType:
+      type: string
+      enum: [MUNICIPALITY, VILLAGE_COUNCIL, PROJECT_COMMITTEE]
+    SourceType:
+      type: string
+      enum: [CENSUS, BOOK, ARTICLE, GOVERNMENT, WEBSITE, ORAL, OTHER]
+
+    PaginationMeta:
+      type: object
+      required: [page, limit, total, totalPages, hasNextPage, hasPrevPage]
+      properties:
+        page: { type: integer }
+        limit: { type: integer }
+        total: { type: integer }
+        totalPages: { type: integer }
+        hasNextPage: { type: boolean }
+        hasPrevPage: { type: boolean }
+
+    VillageRef:
+      type: object
+      required: [id, slug, nameAr, nameEn]
+      properties:
+        id: { type: string, format: uuid }
+        slug: { type: string }
+        nameAr: { type: string }
+        nameEn: { type: string, nullable: true }
+
+    VillageListItem:
+      type: object
+      required: [id, slug, nameAr, nameEn, latitude, longitude, verificationStatus, governorate, localAuthority]
+      properties:
+        id: { type: string, format: uuid }
+        slug: { type: string }
+        nameAr: { type: string }
+        nameEn: { type: string, nullable: true }
+        latitude: { type: number, nullable: true }
+        longitude: { type: number, nullable: true }
+        verificationStatus: { $ref: '#/components/schemas/VerificationStatus' }
+        governorate:
+          type: object
+          required: [id, nameAr, nameEn]
+          properties:
+            id: { type: string, format: uuid }
+            nameAr: { type: string }
+            nameEn: { type: string }
+        localAuthority:
+          type: object
+          nullable: true
+          required: [id, nameAr]
+          properties:
+            id: { type: string, format: uuid }
+            nameAr: { type: string }
+
+    VillageAlternateName:
+      type: object
+      required: [id, name, language, nameType, periodFrom, periodTo, source]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        language: { type: string, enum: [ar, en] }
+        nameType: { $ref: '#/components/schemas/VillageNameType' }
+        periodFrom: { type: integer, nullable: true, description: First year the name was used. }
+        periodTo: { type: integer, nullable: true, description: Last year the name was used. }
+        source:
+          type: object
+          nullable: true
+          description: '`null` when there is no source or the source was deleted.'
+          required: [id, title]
+          properties:
+            id: { type: string, format: uuid }
+            title: { type: string }
+
+    VillageDetails:
+      type: object
+      required:
+        - id
+        - slug
+        - pcbsCode
+        - nameAr
+        - nameEn
+        - nameOrigin
+        - latitude
+        - longitude
+        - elevationM
+        - areaDunums
+        - locationDescription
+        - historicalOverview
+        - geoDisplayName
+        - geoEnrichedAt
+        - verificationStatus
+        - version
+        - createdAt
+        - updatedAt
+        - governorate
+        - localAuthority
+        - nameOriginSource
+        - names
+      properties:
+        id: { type: string, format: uuid }
+        slug: { type: string }
+        pcbsCode: { type: string, nullable: true, description: Code of the Palestinian Central Bureau of Statistics. }
+        nameAr: { type: string }
+        nameEn: { type: string, nullable: true }
+        nameOrigin: { type: string, nullable: true, description: Origin of the name; always has a source when set. }
+        latitude: { type: number, nullable: true, minimum: -90, maximum: 90 }
+        longitude: { type: number, nullable: true, minimum: -180, maximum: 180 }
+        elevationM: { type: integer, nullable: true }
+        areaDunums: { type: number, nullable: true }
+        locationDescription: { type: string, nullable: true }
+        historicalOverview: { type: string, nullable: true }
+        geoDisplayName: { type: string, nullable: true, description: Display name from geocoding. Written only by the geo enrichment job. }
+        geoEnrichedAt: { type: string, format: date-time, nullable: true, description: When geocoding last set the coordinates. }
+        verificationStatus: { $ref: '#/components/schemas/VerificationStatus' }
+        version: { type: integer, minimum: 1, description: 'Send this value in the `version` field of an update, verify or reject.' }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        governorate:
+          type: object
+          required: [id, nameAr, nameEn, code]
+          properties:
+            id: { type: string, format: uuid }
+            nameAr: { type: string }
+            nameEn: { type: string }
+            code: { type: string }
+        localAuthority:
+          type: object
+          nullable: true
+          required: [id, nameAr, nameEn, type]
+          properties:
+            id: { type: string, format: uuid }
+            nameAr: { type: string }
+            nameEn: { type: string, nullable: true }
+            type: { $ref: '#/components/schemas/LocalAuthorityType' }
+        nameOriginSource:
+          type: object
+          nullable: true
+          description: '`null` when there is none or the source was deleted.'
+          required: [id, title, sourceType, url]
+          properties:
+            id: { type: string, format: uuid }
+            title: { type: string }
+            sourceType: { $ref: '#/components/schemas/SourceType' }
+            url: { type: string, nullable: true }
+        names:
+          type: array
+          description: Active alternate names, sorted by name.
+          items: { $ref: '#/components/schemas/VillageAlternateName' }
+
+    NearbyPlace:
+      type: object
+      description: A recorded relation, seen from the requested village whichever side it was stored on.
+      required: [placeName, placeType, relation, distanceKm, village]
+      properties:
+        placeName: { type: string }
+        placeType: { $ref: '#/components/schemas/PlaceType' }
+        relation: { $ref: '#/components/schemas/PlaceRelation' }
+        distanceKm: { type: number, nullable: true }
+        village:
+          type: object
+          nullable: true
+          description: 'The related village (same fields as VillageRef), or `null` for a place that is not a village or whose village was deleted.'
+          required: [id, slug, nameAr, nameEn]
+          properties:
+            id: { type: string, format: uuid }
+            slug: { type: string }
+            nameAr: { type: string }
+            nameEn: { type: string, nullable: true }
+
+    VillageWithinRadius:
+      allOf:
+        - $ref: '#/components/schemas/VillageRef'
+        - type: object
+          required: [distanceKm]
+          properties:
+            distanceKm: { type: number, description: 'Distance from the requested village, rounded to two decimals.' }
+
+    CreateVillageRequest:
+      type: object
+      additionalProperties: false
+      required: [slug, nameAr, governorateId]
+      properties:
+        slug:
+          type: string
+          maxLength: 100
+          pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$'
+          description: Lowercase English letters, digits and single hyphens (it is used in URLs). Trimmed. Unique.
+        pcbsCode: { type: string, minLength: 1, maxLength: 20, nullable: true, description: Unique. }
+        nameAr: { type: string, minLength: 1, maxLength: 200 }
+        nameEn: { type: string, minLength: 1, maxLength: 200, nullable: true }
+        governorateId: { type: string, format: uuid }
+        localAuthorityId: { type: string, format: uuid, nullable: true }
+        nameOrigin: { type: string, minLength: 1, maxLength: 5000, nullable: true }
+        nameOriginSourceId: { type: string, format: uuid, nullable: true, description: Required when `nameOrigin` is set. }
+        latitude: { type: number, minimum: -90, maximum: 90, nullable: true, description: Send together with `longitude`. }
+        longitude: { type: number, minimum: -180, maximum: 180, nullable: true, description: Send together with `latitude`. }
+        elevationM: { type: integer, nullable: true }
+        areaDunums: { type: number, minimum: 0, exclusiveMinimum: true, nullable: true }
+        locationDescription: { type: string, minLength: 1, maxLength: 10000, nullable: true }
+        historicalOverview: { type: string, minLength: 1, maxLength: 10000, nullable: true }
+
+    UpdateVillageRequest:
+      type: object
+      additionalProperties: false
+      required: [version]
+      description: '`version` plus at least one other field. The same fields as on create, all optional.'
+      properties:
+        version: { type: integer, minimum: 1, description: The version the client last read. }
+        slug: { type: string, maxLength: 100, pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$' }
+        pcbsCode: { type: string, minLength: 1, maxLength: 20, nullable: true }
+        nameAr: { type: string, minLength: 1, maxLength: 200 }
+        nameEn: { type: string, minLength: 1, maxLength: 200, nullable: true }
+        governorateId: { type: string, format: uuid }
+        localAuthorityId: { type: string, format: uuid, nullable: true }
+        nameOrigin: { type: string, minLength: 1, maxLength: 5000, nullable: true }
+        nameOriginSourceId: { type: string, format: uuid, nullable: true }
+        latitude: { type: number, minimum: -90, maximum: 90, nullable: true, description: Send together with `longitude`. }
+        longitude: { type: number, minimum: -180, maximum: 180, nullable: true, description: Send together with `latitude`. }
+        elevationM: { type: integer, nullable: true }
+        areaDunums: { type: number, minimum: 0, exclusiveMinimum: true, nullable: true }
+        locationDescription: { type: string, minLength: 1, maxLength: 10000, nullable: true }
+        historicalOverview: { type: string, minLength: 1, maxLength: 10000, nullable: true }
+
+    VillageVersionRequest:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        version: { type: integer, minimum: 1, description: The version the client last read. }
+
+    VillageNameRecord:
+      type: object
+      description: A stored alternate name. The creator, the updater and `deletedAt` are not returned.
+      required: [id, villageId, name, language, nameType, periodFrom, periodTo, sourceId, verificationStatus, version, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        villageId: { type: string, format: uuid }
+        name: { type: string }
+        language: { type: string, enum: [ar, en] }
+        nameType: { $ref: '#/components/schemas/VillageNameType' }
+        periodFrom: { type: integer, nullable: true }
+        periodTo: { type: integer, nullable: true }
+        sourceId: { type: string, format: uuid, nullable: true }
+        verificationStatus: { $ref: '#/components/schemas/VerificationStatus' }
+        version: { type: integer, minimum: 1 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    CreateVillageNameRequest:
+      type: object
+      additionalProperties: false
+      required: [name, language, nameType]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 200 }
+        language: { type: string, enum: [ar, en] }
+        nameType: { $ref: '#/components/schemas/VillageNameType' }
+        periodFrom: { type: integer, nullable: true, description: Must not be after `periodTo`. }
+        periodTo: { type: integer, nullable: true }
+        sourceId: { type: string, format: uuid, nullable: true }
+
+    UpdateVillageNameRequest:
+      type: object
+      additionalProperties: false
+      required: [version]
+      description: '`version` plus at least one other field.'
+      properties:
+        version: { type: integer, minimum: 1, description: The version the client last read. }
+        name: { type: string, minLength: 1, maxLength: 200 }
+        language: { type: string, enum: [ar, en] }
+        nameType: { $ref: '#/components/schemas/VillageNameType' }
+        periodFrom: { type: integer, nullable: true }
+        periodTo: { type: integer, nullable: true }
+        sourceId: { type: string, format: uuid, nullable: true }
+
+    CreateNearbyPlaceRequest:
+      description: One of two shapes. A body that mixes them is rejected.
+      oneOf:
+        - type: object
+          title: A village we have
+          additionalProperties: false
+          required: [relatedVillageId, relation]
+          properties:
+            relatedVillageId: { type: string, format: uuid }
+            relation: { $ref: '#/components/schemas/PlaceRelation' }
+            distanceKm: { type: number, minimum: 0, exclusiveMinimum: true, nullable: true }
+        - type: object
+          title: A place we have no row for
+          additionalProperties: false
+          required: [placeName, placeType, relation]
+          properties:
+            placeName: { type: string, minLength: 1, maxLength: 200 }
+            placeType: { $ref: '#/components/schemas/PlaceType' }
+            relation: { $ref: '#/components/schemas/PlaceRelation' }
+            distanceKm: { type: number, minimum: 0, exclusiveMinimum: true, nullable: true }
+
+    NearbyPlaceRecord:
+      type: object
+      description: A stored nearby place.
+      required: [id, villageId, relatedVillageId, placeName, placeType, relation, distanceKm, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        villageId: { type: string, format: uuid }
+        relatedVillageId: { type: string, format: uuid, nullable: true }
+        placeName: { type: string }
+        placeType: { $ref: '#/components/schemas/PlaceType' }
+        relation: { $ref: '#/components/schemas/PlaceRelation' }
+        distanceKm: { type: number, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    ErrorDetail:
+      type: object
+      required: [field, message]
+      properties:
+        field: { type: string }
+        message: { type: string }
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, details, requestId]
+          properties:
+            code:
+              type: string
+              description: |
+                Machine-readable code, e.g. VALIDATION_ERROR, INVALID_JSON, UNAUTHORIZED, FORBIDDEN, NOT_FOUND,
+                VILLAGE_EDIT_FORBIDDEN, CHANGE_REQUEST_REQUIRED, VERSION_CONFLICT, SLUG_TAKEN, PCBS_CODE_TAKEN,
+                VILLAGE_NAME_EXISTS, NEARBY_RELATION_EXISTS,
+                NEARBY_PLACE_NAME_EXISTS, GOVERNORATE_NOT_FOUND, LOCAL_AUTHORITY_NOT_FOUND,
+                LOCAL_AUTHORITY_GOVERNORATE_MISMATCH, NAME_ORIGIN_REQUIRES_SOURCE, SOURCE_NOT_FOUND,
+                NEARBY_SELF_RELATION, RELATED_VILLAGE_NOT_FOUND, VILLAGE_HAS_NO_COORDINATES, TOO_MANY_REQUESTS,
+                INTERNAL_ERROR.
+            message: { type: string }
+            details:
+              type: array
+              items: { $ref: '#/components/schemas/ErrorDetail' }
+            requestId: { type: string }
+
+  responses:
+    ValidationError:
+      description: Invalid request (`VALIDATION_ERROR` or `INVALID_JSON`).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          example:
+            error:
+              code: VALIDATION_ERROR
+              message: Request validation failed
+              details: [{ field: body.latitude, message: 'latitude and longitude must be sent together, both as numbers or both as null' }]
+              requestId: 1f2e-example
+    Unauthorized:
+      description: Missing, invalid or expired access token (`UNAUTHORIZED`).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    Forbidden:
+      description: Authenticated, but the role is not allowed for this endpoint (`FORBIDDEN`).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    VillageNotFound:
+      description: The village does not exist or was deleted (`NOT_FOUND`).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          example:
+            error: { code: NOT_FOUND, message: Village not found, details: [], requestId: 7b3c-example }
+    VersionConflict:
+      description: The `version` is not the stored one (`VERSION_CONFLICT`); nothing was written.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          example:
+            error:
+              code: VERSION_CONFLICT
+              message: The village was changed by someone else; reload it and retry
+              details: [{ field: version, message: Current version is 3 }]
+              requestId: 8a3b-example
+    NameConflict:
+      description: The village already has this name in this language (`VILLAGE_NAME_EXISTS`).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          example:
+            error:
+              code: VILLAGE_NAME_EXISTS
+              message: This village already has this name in this language
+              details: [{ field: name, message: Name already exists for this village and language }]
+              requestId: 6d1e-example
+    SourceNotFound:
+      description: The source does not exist or was deleted (`SOURCE_NOT_FOUND`).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          example:
+            error:
+              code: SOURCE_NOT_FOUND
+              message: Source does not exist
+              details: [{ field: sourceId, message: Source does not exist }]
+              requestId: 4e8a-example
+    VillageRuleViolation:
+      description: |
+        A business rule was broken. `code` is one of `GOVERNORATE_NOT_FOUND`, `LOCAL_AUTHORITY_NOT_FOUND`,
+        `LOCAL_AUTHORITY_GOVERNORATE_MISMATCH`, `NAME_ORIGIN_REQUIRES_SOURCE` or `SOURCE_NOT_FOUND`.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          example:
+            error:
+              code: LOCAL_AUTHORITY_GOVERNORATE_MISMATCH
+              message: Local authority does not belong to the village's governorate
+              details: [{ field: localAuthorityId, message: Local authority does not belong to the village's governorate }]
+              requestId: 2c5f-example
+    TooManyRequests:
+      description: Rate limit exceeded (`TOO_MANY_REQUESTS`).
+      headers:
+        Retry-After:
+          description: Seconds until the client may retry.
+          schema: { type: integer }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
