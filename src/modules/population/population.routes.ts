@@ -1,0 +1,12 @@
+import { Router } from 'express';
+import { validate } from '../../shared/middlewares/validate.js';
+import { authenticate } from '../../shared/middlewares/authenticate.js';
+import { requireRole } from '../../shared/middlewares/requireRole.js';
+import * as controller from './population.controller.js';
+import { createPopulationSchema, updatePopulationSchema, listPopulationQuerySchema, populationParamsSchema, villagePopulationParamsSchema } from './population.schemas.js';
+export const villagePopulationRouter = Router({mergeParams: true});
+export const populationRouter = Router();
+villagePopulationRouter.post('/', authenticate, requireRole('EDITOR', 'REVIEWER', 'ADMIN'), validate({params: villagePopulationParamsSchema, body: createPopulationSchema}), controller.create);
+villagePopulationRouter.get('/', validate({params: villagePopulationParamsSchema, query: listPopulationQuerySchema}), controller.list);
+populationRouter.get('/:id', validate({params: populationParamsSchema}), controller.getById);
+populationRouter.patch('/:id', authenticate, requireRole('EDITOR', 'REVIEWER', 'ADMIN'), validate({params: populationParamsSchema, body: updatePopulationSchema}), controller.update);
