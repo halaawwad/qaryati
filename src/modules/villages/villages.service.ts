@@ -64,9 +64,14 @@ export interface GeoEnrichmentOptions {
   requestId?: string | null;
   /** Replace coordinates that are already set. REVIEWER or ADMIN only. */
   overwrite?: boolean;
+  /** Internal reviewed-candidate guard, run under the village lock before writing. */
+  beforeApply?: () => void;
+  /** Server-selected provenance appended to the single village audit entry. */
+  provenance?: Prisma.InputJsonObject;
 }
 
 export interface GeoEnrichmentVillage {
+  updatedAt: Date;
   id: string;
   version: number;
   latitude: number | null;
@@ -211,6 +216,7 @@ async function assertConsistent(
 
 function toGeoVillage(row: Village): GeoEnrichmentVillage {
   return {
+    updatedAt: row.updatedAt,
     id: row.id,
     version: row.version,
     latitude: row.latitude?.toNumber() ?? null,
@@ -423,9 +429,10 @@ export class VillageService {
     const { latitude, longitude, geoDisplayName } = parsed.data;
 
     return this.repository.transaction(async (writes, tx): Promise<GeoEnrichmentResult> => {
-      const before = await writes.findById(villageId);
+      const before = await writes.findById(villageId, options.beforeApply ? true : undefined);
       if (!before || before.deletedAt) throw villageNotFound();
       if (expectedVersion !== undefined && before.version !== expectedVersion) throw versionConflict(before.version);
+      options.beforeApply?.();
 
       if (hasCoordinates(before) && !overwrite) {
         return { status: 'skipped', reason: 'COORDINATES_ALREADY_SET', village: toGeoVillage(before) };
@@ -439,7 +446,7 @@ export class VillageService {
         before,
         before.version,
         { latitude, longitude, geoDisplayName, geoEnrichedAt: new Date(), verificationStatus: VerificationStatus.PENDING },
-        { source: GEO_AUDIT_SOURCE },
+        { source: GEO_AUDIT_SOURCE, ...(options.provenance ? { provenance: options.provenance } : {}) },
       );
 
       return { status: 'applied', village: toGeoVillage(after) };

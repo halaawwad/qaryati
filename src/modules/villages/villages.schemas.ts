@@ -27,6 +27,13 @@ export const villageDetailsParamsSchema = z.object({
 
 export const MAX_NEARBY_RADIUS_KM = 50;
 
+export const villageGeoParamsSchema = z.strictObject({ id: z.uuid() });
+export const applyGeoEnrichmentSchema = z.strictObject({
+  candidateRef: z.uuid(), version: z.number().int().positive().max(2147483646),
+  confirm: z.literal(true), overwriteExisting: z.boolean().default(false),
+});
+export type ApplyGeoEnrichment = z.infer<typeof applyGeoEnrichmentSchema>;
+
 export const nearbyVillagesQuerySchema = z.object({
   radiusKm: z.coerce.number().positive().max(MAX_NEARBY_RADIUS_KM).optional(),
 });
