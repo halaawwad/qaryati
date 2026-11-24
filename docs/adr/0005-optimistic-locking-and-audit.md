@@ -1,8 +1,8 @@
 # ADR-0005: Optimistic locking with a version column and same-transaction audit
 
 ## Status
-Proposed (November 2026). Implemented in the village write endpoints (pull
-request #31); it becomes Accepted when the team agrees.
+Accepted (2026-11-24). Implemented in the village write endpoints (pull
+request #31).
 
 ## Context
 Editors, reviewers and admins change the same villages. A reviewer verifies a
