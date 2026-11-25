@@ -2,7 +2,7 @@ openapi: "3.0.3"
 info:
   title: Qaryati API - Population Records
   version: "1.0.0"
-  description: Population record read, create, update, and soft-delete endpoints. Paths include the API prefix.
+  description: Population record read, create, update, review, and soft-delete endpoints. Paths include the API prefix.
 servers:
   - url: /
 paths:
@@ -227,10 +227,79 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '429': { $ref: '#/components/responses/Error' }
         '500': { $ref: '#/components/responses/Error' }
+  /api/v1/population-records/{id}/verify:
+    post:
+      operationId: verifyPopulationRecord
+      summary: Verify a population record
+      description: &reviewDescription >-
+        REVIEWER or ADMIN only. The body must contain only expectedVersion.
+        PENDING and REJECTED can transition to VERIFIED; PENDING and VERIFIED
+        can transition to REJECTED. Repeating the current status with a matching
+        version is a no-op with no update or audit; a stale version returns 409
+        even for a no-op. A transition increments version once and is audited
+        atomically. Verification sets verifiedById and verifiedAt and preserves
+        isPreferred. Rejection clears those verification fields and isPreferred
+        without selecting a replacement. Preserving needsReview and clearing
+        preferred on rejection are Population module policies; these are not
+        explicit team-guide rules. An active village is required; a deleted source
+        is permitted. Authentication and role checks precede route validation;
+        the global JSON parser may return 400 or 413 before authentication.
+        Version is stored as a PostgreSQL integer; incrementing a stored maximum
+        value (2147483647) exceeds its range. The exhaustion policy is unresolved.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody: &reviewBody
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReviewPopulationRecord' }
+      responses: &reviewResponses
+        '200':
+          description: Updated or unchanged public Population record.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/PopulationRecord' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Error' }
+        '413': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+        '500': { $ref: '#/components/responses/Error' }
+  /api/v1/population-records/{id}/reject:
+    post:
+      operationId: rejectPopulationRecord
+      summary: Reject a population record
+      description: *reviewDescription
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody: *reviewBody
+      responses: *reviewResponses
 components:
   securitySchemes:
     bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
   schemas:
+    ReviewPopulationRecord:
+      type: object
+      additionalProperties: false
+      required: [expectedVersion]
+      properties:
+        expectedVersion: { type: integer, minimum: 1, maximum: 2147483647 }
     UpdatePopulationRecord:
       type: object
       additionalProperties: false
@@ -306,7 +375,7 @@ components:
             requestId: { type: string }
   responses:
     ValidationError:
-      description: Invalid path or query parameters.
+      description: Invalid path parameters, query parameters, or request body.
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorResponse' }

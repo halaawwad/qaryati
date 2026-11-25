@@ -9,7 +9,7 @@ export interface PopulationListParams {
  sort: { field: 'referenceYear' | 'population' | 'createdAt' | 'updatedAt'; order: 'asc' | 'desc' }; skip: number; take: number;
 }
 type DeleteSnapshot = PopulationDetails & Pick<PopulationRecord, 'createdById' | 'updatedById' | 'verifiedById' | 'verifiedAt'>;
-export interface PopulationRepository { transaction<T>(fn: (client: Prisma.TransactionClient) => Promise<T>): Promise<T>; findLatestVerified(villageId: string, client: Prisma.TransactionClient, excludeId?: string): Promise<{population: number} | null>; create(villageId: string, input: CreatePopulationInput, needsReview: boolean, context: PopulationCreateContext, client: Prisma.TransactionClient): Promise<PopulationDetails>; findForUpdate(id: string, client: Prisma.TransactionClient): Promise<(PopulationDetails & {createdById: string | null}) | null>; findForDelete(id: string, client: Prisma.TransactionClient): Promise<DeleteSnapshot | null>; softDelete(id: string, actorId: string, client: Prisma.TransactionClient): Promise<DeleteSnapshot & {deletedAt: Date | null}>; update(id: string, input: UpdatePopulationInput, actorId: string, client: Prisma.TransactionClient, needsReview?: boolean): Promise<PopulationDetails>; findMany(params: PopulationListParams): Promise<{ items: PopulationDetails[]; total: number }>; findById(id: string): Promise<PopulationDetails | null> }
+export interface PopulationRepository { transaction<T>(fn: (client: Prisma.TransactionClient) => Promise<T>): Promise<T>; findLatestVerified(villageId: string, client: Prisma.TransactionClient, excludeId?: string): Promise<{population: number} | null>; create(villageId: string, input: CreatePopulationInput, needsReview: boolean, context: PopulationCreateContext, client: Prisma.TransactionClient): Promise<PopulationDetails>; findForUpdate(id: string, client: Prisma.TransactionClient): Promise<(PopulationDetails & {createdById: string | null}) | null>; findForDelete(id: string, client: Prisma.TransactionClient): Promise<DeleteSnapshot | null>; review(id: string, expectedVersion: number, currentStatus: VerificationStatus, target: 'VERIFIED' | 'REJECTED', actorId: string, client: Prisma.TransactionClient): Promise<DeleteSnapshot>; softDelete(id: string, actorId: string, client: Prisma.TransactionClient): Promise<DeleteSnapshot & {deletedAt: Date | null}>; update(id: string, input: UpdatePopulationInput, actorId: string, client: Prisma.TransactionClient, needsReview?: boolean): Promise<PopulationDetails>; findMany(params: PopulationListParams): Promise<{ items: PopulationDetails[]; total: number }>; findById(id: string): Promise<PopulationDetails | null> }
 const select = { id: true, villageId: true, population: true, referenceYear: true, referenceDate: true, sourceId: true, isEstimate: true, isPreferred: true, needsReview: true, notes: true, verificationStatus: true, version: true, createdAt: true, updatedAt: true } satisfies Prisma.PopulationRecordSelect;
 const deleteSelect = {...select, createdById: true, updatedById: true, verifiedById: true, verifiedAt: true} satisfies Prisma.PopulationRecordSelect;
 const active = { deletedAt: null, village: { deletedAt: null } } satisfies Prisma.PopulationRecordWhereInput;
@@ -39,6 +39,20 @@ export const populationRepository: PopulationRepository = {
   const rows = await client.$queryRaw<{id: string}[]>`SELECT id FROM population_records WHERE id = ${id}::uuid AND deleted_at IS NULL FOR UPDATE`;
   if (!rows.length) return null;
   return client.populationRecord.findFirst({where: {id, deletedAt: null}, select: deleteSelect});
+ },
+ async review(id, expectedVersion, currentStatus, target, actorId, client) {
+  try {
+   return await client.populationRecord.update({
+    where: {id, deletedAt: null, version: expectedVersion, verificationStatus: currentStatus},
+    data: {verificationStatus: target, verifiedById: target === 'VERIFIED' ? actorId : null,
+     verifiedAt: target === 'VERIFIED' ? new Date() : null, updatedById: actorId,
+     ...(target === 'REJECTED' ? {isPreferred: false} : {}), version: {increment: 1}},
+    select: deleteSelect,
+   });
+  } catch (error) {
+   if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') throw new ConflictError('Population record changed during review');
+   throw error;
+  }
  },
  async softDelete(id, actorId, client) {
   try {
