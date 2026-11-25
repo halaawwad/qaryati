@@ -145,7 +145,8 @@ export class PopulationService {
  async list(villageId: string, query: ListPopulationQuery) {
   await this.villages.ensureExists(villageId);
   const pagination = parsePagination(query);
-  const {referenceYear, sourceId, isEstimate, isPreferred, needsReview, verificationStatus} = query;
+  const {referenceYear, sourceId, isEstimate, needsReview, verificationStatus} = query;
+  const isPreferred = query.includeAll ? undefined : query.isPreferred ?? true;
   const result = await this.repository.findMany({villageId, filters: {referenceYear, sourceId, isEstimate, isPreferred, needsReview, verificationStatus}, sort: {field: query.sort ?? 'referenceYear', order: query.order ?? 'desc'}, skip: pagination.skip, take: pagination.take});
   if (result.items.length === 0) await this.villages.ensureExists(villageId);
   return {items: result.items, meta: buildPaginationMeta(result.total, pagination)};

@@ -54,7 +54,13 @@ paths:
       summary: List population records for a village
       description: >-
         Returns active records for an active village, including records whose source is
-        soft-deleted and records of all verification statuses. Unknown query keys are
+        soft-deleted and records of all verification statuses. By default only preferred
+        records are returned; this changes the result for callers that previously omitted
+        isPreferred. No fallback is selected for a year without a preferred record.
+        Use includeAll=true for all eligible records, or isPreferred=true or false to
+        select that flag. includeAll=false preserves the default or explicit isPreferred
+        filter; includeAll=true combined with isPreferred returns 400. All filters are
+        combined and pagination totals count only matching records. Unknown query keys are
         ignored. A valid page beyond the last result returns an empty array. An
         effective pagination offset exceeding 2147483647 returns HTTP 400. The
         count and page are read from the same database snapshot.
@@ -83,6 +89,10 @@ paths:
           schema: { type: string, enum: ["true", "false"] }
         - name: isPreferred
           in: query
+          schema: { type: string, enum: ["true", "false"] }
+        - name: includeAll
+          in: query
+          description: Return both preference values when true; cannot be combined with isPreferred when true.
           schema: { type: string, enum: ["true", "false"] }
         - name: needsReview
           in: query
