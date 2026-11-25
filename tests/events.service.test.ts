@@ -16,6 +16,12 @@ function event(verificationStatus: VerificationStatus = VerificationStatus.PENDI
 }
 
 class FakeEventRepository implements EventRepository {
+  transaction = vi.fn<EventRepository['transaction']>();
+  create = vi.fn<EventRepository['create']>();
+  findForWrite = vi.fn<EventRepository['findForWrite']>();
+  lock = vi.fn<EventRepository['lock']>();
+  updateIfVersion = vi.fn<EventRepository['updateIfVersion']>();
+  softDelete = vi.fn<EventRepository['softDelete']>();
   listResult: { items: EventDetails[]; total: number } | null = { items: [], total: 0 };
   detail: EventDetails | null = null;
   lastParams: EventListParams | undefined;
