@@ -127,8 +127,9 @@ describe('public facilities routes', () => {
     expect(service.create).not.toHaveBeenCalled();
   });
 
-  it.each(['patch', 'delete'] as const)('does not expose %s on either facilities route', async method => {
-    for (const path of [listPath, detailPath]) {
+  it.each(['patch', 'delete'] as const)('protects %s detail and does not expose it on the collection', async method => {
+    expect((await request(app)[method](detailPath).send({})).status).toBe(401);
+    for (const path of [listPath]) {
       const response = await request(app)[method](path).send({});
       expect(response.status).toBe(404);
       expect(response.body.error.code).toBe('NOT_FOUND');
