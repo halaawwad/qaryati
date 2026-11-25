@@ -10,3 +10,4 @@ villagePopulationRouter.post('/', authenticate, requireRole('EDITOR', 'REVIEWER'
 villagePopulationRouter.get('/', validate({params: villagePopulationParamsSchema, query: listPopulationQuerySchema}), controller.list);
 populationRouter.get('/:id', validate({params: populationParamsSchema}), controller.getById);
 populationRouter.patch('/:id', authenticate, requireRole('EDITOR', 'REVIEWER', 'ADMIN'), validate({params: populationParamsSchema, body: updatePopulationSchema}), controller.update);
+populationRouter.delete('/:id', authenticate, requireRole('ADMIN'), validate({params: populationParamsSchema}), controller.softDelete);

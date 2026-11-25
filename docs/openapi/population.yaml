@@ -2,7 +2,7 @@ openapi: "3.0.3"
 info:
   title: Qaryati API - Population Records
   version: "1.0.0"
-  description: Population record read, create, and update endpoints. Paths include the API prefix.
+  description: Population record read, create, update, and soft-delete endpoints. Paths include the API prefix.
 servers:
   - url: /
 paths:
@@ -115,6 +115,50 @@ paths:
         '429': { $ref: '#/components/responses/Error' }
         '500': { $ref: '#/components/responses/Error' }
   /api/v1/population-records/{id}:
+    delete:
+      operationId: deletePopulationRecord
+      summary: Soft-delete a population record
+      description: >-
+        ADMIN only, regardless of ownership or verification status. No request body
+        or version is required; a successfully parsed body is ignored. Sets deletedAt and
+        updatedById and clears isPreferred without changing version or selecting a
+        replacement. Other data and the village/year/source uniqueness reservation
+        remain intact. Deletion and audit are atomic. A missing or deleted record or
+        inactive parent village returns 404. The first successful deletion can return
+        200; after its transaction commits, a later contender returns 404. This
+        unversioned operation does not detect stale client versions. The global JSON
+        parser can return 400 for malformed JSON or 413 for an oversized JSON body
+        before route-level authentication.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Population record soft-deleted.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: object
+                    required: [id, version, deletedAt]
+                    properties:
+                      id: { type: string, format: uuid }
+                      version: { type: integer }
+                      deletedAt: { type: string, format: date-time }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '413': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+        '500': { $ref: '#/components/responses/Error' }
     patch:
       operationId: updatePopulationRecord
       summary: Update a population record
