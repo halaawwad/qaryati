@@ -3,6 +3,32 @@ import { z } from 'zod';
 
 export const EVENT_SORT_FIELDS = ['eventYear', 'eventDate', 'title', 'createdAt'] as const;
 
+// Historical years are independent of the optional timestamp; BCE dates use eventYear.
+const eventDateSchema = z.iso.datetime({ offset: true })
+  .refine(value => {
+    const date = new Date(value);
+    return Number.isFinite(date.getTime()) && date.getUTCFullYear() >= 1 && date.getUTCFullYear() <= 9999;
+  }, 'eventDate must normalize to a year from 0001 through 9999')
+  .transform(value => new Date(value));
+const eventFields = {
+  title: z.string().trim().min(1).max(200),
+  description: z.string().trim().max(5000).nullable().optional(),
+  eventYear: z.number().int().min(-2147483648).max(2147483647).nullable().optional(),
+  eventDate: eventDateSchema.nullable().optional(),
+  isApproximate: z.boolean(),
+  category: z.string().trim().min(1).max(100).nullable().optional(),
+  sourceId: z.uuid().nullable().optional(),
+};
+export const createEventSchema = z.strictObject({ ...eventFields, isApproximate: eventFields.isApproximate.default(false) });
+export const updateEventSchema = z.strictObject({
+  ...eventFields, title: eventFields.title.optional(), isApproximate: eventFields.isApproximate.optional(),
+  version: z.number().int().positive().max(2147483646),
+}).refine(value => Object.entries(value).some(([key, field]) => key !== 'version' && field !== undefined), {
+  message: 'At least one editable field is required',
+});
+export type CreateEventInput = z.infer<typeof createEventSchema>;
+export type UpdateEventInput = z.infer<typeof updateEventSchema>;
+
 export const villageEventsParamsSchema = z.object({
   villageId: z.uuid(),
 });
