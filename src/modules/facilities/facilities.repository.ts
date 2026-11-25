@@ -1,6 +1,6 @@
 import type { Facility, FacilityType, Prisma, VerificationStatus } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
-import type { CreateFacilityInput, FacilitySortField, SortOrder } from './facilities.schemas.js';
+import type { CreateFacilityInput, UpdateFacilityInput, FacilitySortField, SortOrder } from './facilities.schemas.js';
 
 export interface FacilityCreateContext {
   actorId: string;
@@ -27,12 +27,18 @@ export interface FacilitiesListParams {
 }
 
 export interface FacilitiesRepository {
+  findForWrite(id: string, client: Prisma.TransactionClient): Promise<FacilityWriteRecord | null>;
+  lock(id: string, client: Prisma.TransactionClient): Promise<void>;
+  updateIfVersion(id: string, input: UpdateFacilityInput, actorId: string, client: Prisma.TransactionClient): Promise<number>;
+  softDelete(id: string, actorId: string, client: Prisma.TransactionClient): Promise<number>;
   transaction<T>(fn: (client: Prisma.TransactionClient) => Promise<T>): Promise<T>;
   create(villageId: string, input: CreateFacilityInput, context: FacilityCreateContext, client: Prisma.TransactionClient): Promise<FacilitiesDetails>;
   findMany(params: FacilitiesListParams): Promise<{ items: FacilitiesDetails[]; total: number }>;
   /** Only active facilities belonging to active villages are visible. */
   findById(id: string): Promise<FacilitiesDetails | null>;
 }
+
+export type FacilityWriteRecord = FacilitiesDetails & Pick<Facility, 'createdById' | 'updatedById' | 'deletedAt'>;
 
 const facilitySelect = {
   id: true, villageId: true, facilityType: true, name: true, description: true,
@@ -83,6 +89,25 @@ function buildOrderBy({ field, order }: FacilitiesListParams['sort']): Prisma.Fa
 }
 
 export const facilitiesRepository: FacilitiesRepository = {
+  async findForWrite(id, client) {
+    const row = await client.facility.findFirst({ where: { id, village: { deletedAt: null } },
+      select: { ...facilitySelect, createdById: true, updatedById: true, deletedAt: true } });
+    return row ? { ...toFacility(row), createdById: row.createdById, updatedById: row.updatedById, deletedAt: row.deletedAt } : null;
+  },
+  async lock(id, client) {
+    await client.$queryRaw`SELECT id FROM facilities WHERE id = ${id}::uuid FOR UPDATE`;
+  },
+  async updateIfVersion(id, input, actorId, client) {
+    const { version, ...changes } = input;
+    const result = await client.facility.updateMany({ where: { ...activeFacility, id, version },
+      data: { ...changes, verificationStatus: 'PENDING', updatedById: actorId, version: { increment: 1 } } });
+    return result.count;
+  },
+  async softDelete(id, actorId, client) {
+    const result = await client.facility.updateMany({ where: { ...activeFacility, id },
+      data: { deletedAt: new Date(), updatedById: actorId } });
+    return result.count;
+  },
   transaction(fn) {
     return prisma.$transaction(fn);
   },

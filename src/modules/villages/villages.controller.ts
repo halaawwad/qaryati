@@ -1,3 +1,4 @@
+
 import type { Request, RequestHandler } from 'express';
 import type {
   CreateVillageInput,
@@ -8,11 +9,47 @@ import type {
   VillageIdParams,
   VillageVersionInput,
 } from './villages.schemas.js';
+
 import { villageService, type WriteActor } from './villages.service.js';
+import { villageGeoService } from './villages.geo.service.js';
 
 function actorOf(req: Request): WriteActor {
-  return { userId: req.user.id, role: req.user.role, requestId: req.requestId };
+  return {
+    userId: req.user.id,
+    role: req.user.role,
+    requestId: req.requestId,
+  };
 }
+
+export const geoCandidates: RequestHandler = async (req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  try {
+    res.status(200).json({
+      data: await villageGeoService.candidates(req.params.id as string),
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const applyGeoEnrichment: RequestHandler = async (req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  try {
+    const data = await villageGeoService.apply(
+      req.params.id as string,
+      req.body,
+      {
+        actorId: req.user.id,
+        role: req.user.role,
+        requestId: req.requestId,
+      },
+    );
+    res.status(200).json({ data });
+  } catch (error) {
+    next(error);
+  }
+};
+
 
 export const list: RequestHandler = async (req, res, next) => {
   try {

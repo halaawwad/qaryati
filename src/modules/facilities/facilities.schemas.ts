@@ -53,6 +53,27 @@ export const createFacilitySchema = z.strictObject({
 });
 
 export type CreateFacilityInput = z.infer<typeof createFacilitySchema>;
+export const updateFacilitySchema = z.strictObject({
+  version: z.number().int().positive().max(2147483646),
+  name: z.string().trim().min(1).max(200).optional(),
+  facilityType: z.enum(FacilityType).optional(),
+  sourceId: z.uuid().optional(),
+  description: z.string().trim().max(5000).nullable().optional(),
+  asOfYear: z.number().int().min(-2147483648).max(2147483647).nullable().optional(),
+  latitude: z.number().min(-90).max(90).nullable().optional(),
+  longitude: z.number().min(-180).max(180).nullable().optional(),
+}).superRefine((value, ctx) => {
+  if (!Object.entries(value).some(([key, field]) => key !== 'version' && field !== undefined)) {
+    ctx.addIssue({ code: 'custom', message: 'At least one editable field is required' });
+  }
+  const { latitude, longitude } = value;
+  if ((latitude === undefined) !== (longitude === undefined) ||
+      (latitude === null) !== (longitude === null)) {
+    ctx.addIssue({ code: 'custom', path: ['latitude'],
+      message: 'Provide latitude and longitude together as numbers or both null; omit both to preserve coordinates' });
+  }
+});
+export type UpdateFacilityInput = z.infer<typeof updateFacilitySchema>;
 export type VillageFacilitiesParams = z.infer<typeof villageFacilitiesParamsSchema>;
 export type FacilitiesParams = z.infer<typeof facilitiesParamsSchema>;
 export type ListFacilitiesQuery = z.infer<typeof listFacilitiesQuerySchema>;

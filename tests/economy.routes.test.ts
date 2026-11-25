@@ -121,10 +121,9 @@ describe('public economy routes', () => {
     expect(service.list).toHaveBeenCalledWith(villageId, { isMajor: true, asOfYear: 0, sort: 'asOfYear' });
   });
 
-  it.each(['patch', 'delete'] as const)('does not expose %s writes', async method => {
-    for (const path of [listPath, detailPath]) {
-      expect((await request(app)[method](path).send({})).status).toBe(404);
-    }
+  it.each(['patch', 'delete'] as const)('requires authentication for %s and does not expose collection writes', async method => {
+    expect((await request(app)[method](listPath).send({})).status).toBe(404);
+    expect((await request(app)[method](detailPath).send({})).status).toBe(401);
     expect(service.list).not.toHaveBeenCalled();
     expect(service.getById).not.toHaveBeenCalled();
     expect(service.create).not.toHaveBeenCalled();

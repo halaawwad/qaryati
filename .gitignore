@@ -9,6 +9,9 @@ dist/
 .env.*
 !.env.example
 
+# Local-only Geo deployment overrides; never include in shared changes.
+/docker-compose.geo-local.yml
+
 # Tests
 coverage/
 

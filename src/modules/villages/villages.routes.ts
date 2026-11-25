@@ -1,11 +1,16 @@
+
 import { Role } from '@prisma/client';
 import { Router } from 'express';
+
 import { authenticate } from '../../shared/middlewares/authenticate.js';
 import { requireRole } from '../../shared/middlewares/requireRole.js';
 import { validate } from '../../shared/middlewares/validate.js';
+
 import * as relations from './village-relations.controller.js';
 import * as controller from './villages.controller.js';
+
 import {
+  applyGeoEnrichmentSchema,
   createNearbyPlaceBodySchema,
   createVillageBodySchema,
   createVillageNameBodySchema,
@@ -15,6 +20,7 @@ import {
   updateVillageBodySchema,
   updateVillageNameBodySchema,
   villageDetailsParamsSchema,
+  villageGeoParamsSchema,
   villageIdParamsSchema,
   villageNameParamsSchema,
   villageVersionBodySchema,
@@ -25,13 +31,57 @@ const REVIEWERS = [Role.REVIEWER, Role.ADMIN];
 
 export const villagesRouter = Router();
 
-villagesRouter.get('/', validate({ query: listVillagesQuerySchema }), controller.list);
-villagesRouter.get('/:idOrSlug', validate({ params: villageDetailsParamsSchema }), controller.getByIdOrSlug);
+// ============================================================
+// GEO INTEGRATION - ADMIN / REVIEWER
+// ============================================================
+
+villagesRouter.get(
+  '/:id/geo-candidates',
+  authenticate,
+  requireRole(...REVIEWERS),
+  validate({ params: villageGeoParamsSchema }),
+  controller.geoCandidates,
+);
+
+villagesRouter.post(
+  '/:id/geo-enrichment',
+  authenticate,
+  requireRole(...REVIEWERS),
+  validate({
+    params: villageGeoParamsSchema,
+    body: applyGeoEnrichmentSchema,
+  }),
+  controller.applyGeoEnrichment,
+);
+
+// ============================================================
+// PUBLIC VILLAGE ENDPOINTS
+// ============================================================
+
+villagesRouter.get(
+  '/',
+  validate({ query: listVillagesQuerySchema }),
+  controller.list,
+);
+
+villagesRouter.get(
+  '/:idOrSlug',
+  validate({ params: villageDetailsParamsSchema }),
+  controller.getByIdOrSlug,
+);
+
 villagesRouter.get(
   '/:idOrSlug/nearby',
-  validate({ params: villageDetailsParamsSchema, query: nearbyVillagesQuerySchema }),
+  validate({
+    params: villageDetailsParamsSchema,
+    query: nearbyVillagesQuerySchema,
+  }),
   controller.listNearby,
 );
+
+// ============================================================
+// VILLAGE CRUD
+// ============================================================
 
 villagesRouter.post(
   '/',
@@ -40,13 +90,18 @@ villagesRouter.post(
   validate({ body: createVillageBodySchema }),
   controller.create,
 );
+
 villagesRouter.patch(
   '/:id',
   authenticate,
   requireRole(...EDITORS),
-  validate({ params: villageIdParamsSchema, body: updateVillageBodySchema }),
+  validate({
+    params: villageIdParamsSchema,
+    body: updateVillageBodySchema,
+  }),
   controller.update,
 );
+
 villagesRouter.delete(
   '/:id',
   authenticate,
@@ -54,35 +109,59 @@ villagesRouter.delete(
   validate({ params: villageIdParamsSchema }),
   controller.remove,
 );
+
+// ============================================================
+// VILLAGE VERIFICATION
+// ============================================================
+
 villagesRouter.post(
   '/:id/verify',
   authenticate,
   requireRole(...REVIEWERS),
-  validate({ params: villageIdParamsSchema, body: villageVersionBodySchema }),
+  validate({
+    params: villageIdParamsSchema,
+    body: villageVersionBodySchema,
+  }),
   controller.verify,
 );
+
 villagesRouter.post(
   '/:id/reject',
   authenticate,
   requireRole(...REVIEWERS),
-  validate({ params: villageIdParamsSchema, body: villageVersionBodySchema }),
+  validate({
+    params: villageIdParamsSchema,
+    body: villageVersionBodySchema,
+  }),
   controller.reject,
 );
+
+// ============================================================
+// VILLAGE NAMES
+// ============================================================
 
 villagesRouter.post(
   '/:id/names',
   authenticate,
   requireRole(...EDITORS),
-  validate({ params: villageIdParamsSchema, body: createVillageNameBodySchema }),
+  validate({
+    params: villageIdParamsSchema,
+    body: createVillageNameBodySchema,
+  }),
   relations.addName,
 );
+
 villagesRouter.patch(
   '/:id/names/:nameId',
   authenticate,
   requireRole(...EDITORS),
-  validate({ params: villageNameParamsSchema, body: updateVillageNameBodySchema }),
+  validate({
+    params: villageNameParamsSchema,
+    body: updateVillageNameBodySchema,
+  }),
   relations.updateName,
 );
+
 villagesRouter.delete(
   '/:id/names/:nameId',
   authenticate,
@@ -91,13 +170,21 @@ villagesRouter.delete(
   relations.removeName,
 );
 
+// ============================================================
+// NEARBY PLACES MANAGEMENT
+// ============================================================
+
 villagesRouter.post(
   '/:id/nearby',
   authenticate,
   requireRole(...EDITORS),
-  validate({ params: villageIdParamsSchema, body: createNearbyPlaceBodySchema }),
+  validate({
+    params: villageIdParamsSchema,
+    body: createNearbyPlaceBodySchema,
+  }),
   relations.addNearby,
 );
+
 villagesRouter.delete(
   '/:id/nearby/:relationId',
   authenticate,

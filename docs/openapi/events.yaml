@@ -1,12 +1,75 @@
 openapi: "3.0.3"
-info: { title: "Qaryati API - Historical Events", version: "1.0.0", description: "Read APIs are present on the documentation branch; inspected feature branches do not change these implementations. This standalone file documents the implemented routes, not deployment availability. Paths include /api/v1, so use a server origin without that prefix. Public GET operations require no authentication. Every response carries X-Request-Id. All operations are subject to the configured global rate limit (429)." }
+info: {"title":"Qaryati API - Historical Events","version":"1.1.0","description":"Public GET and authenticated POST/PATCH/DELETE APIs. Paths include /api/v1. Every response carries X-Request-Id. All operations are subject to the global rate limit. See docs/events.md."}
 servers:
   - { url: "/", description: "Current API origin; replace with the target server origin when importing." }
 tags:
   - { name: "Historical Events", description: "Historical Events APIs." }
-x-implementation-source: { ref: "docs/openapi-my-modules", commit: "0e110e877d4cfed663b4395106a7066da06eae7c", module: "src/modules/events/", tests: "tests/events*.test.ts" }
+x-implementation-source: { module: "src/modules/events/", tests: "tests/events*.test.ts" }
 paths:
   /api/v1/villages/{villageId}/events:
+    post:
+      "tags": ["Historical Events"]
+      "operationId": "createHistoricalEvent"
+      "summary": "Create a historical event"
+      "description": "EDITOR, REVIEWER and ADMIN may create. Requires an active village; optional non-null sourceId must reference an active source, regardless of source verification status. Creates PENDING/version 1 with creator/updater from the token and exactly one HistoricalEvent CREATE audit in the same transaction."
+      "security": [{"EventsBearerAuth":[]}]
+      "x-allowed-roles": ["EDITOR","REVIEWER","ADMIN"]
+      "parameters": [{"$ref":"#/components/parameters/ContentVillageId"}]
+      "responses":
+        "201":
+          "description": "Created event: PENDING, server-assigned version 1."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/HistoricalEventResponse"
+        "400":
+          "description": "VALIDATION_ERROR: invalid village UUID, missing/invalid title, invalid dates/types/ranges or unknown/protected fields. Malformed JSON returns INVALID_JSON."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ContentErrorResponse"
+        "401":
+          "description": "UNAUTHORIZED: missing, invalid, expired or unsupported-role bearer token."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ContentErrorResponse"
+        "403":
+          "description": "FORBIDDEN if the authenticated role is disallowed. All current roles may create without ownership restrictions. Unsupported token roles return 401."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ContentErrorResponse"
+        "404":
+          "description": "NOT_FOUND: missing/deleted village or supplied source."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ContentErrorResponse"
+        "413":
+          "description": "PAYLOAD_TOO_LARGE: supplied JSON body exceeds the global 1 MB limit."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ContentErrorResponse"
+        "429":
+          "description": "TOO_MANY_REQUESTS: global rate limit exceeded when enabled."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ContentErrorResponse"
+        "500":
+          "description": "INTERNAL_ERROR: unexpected database/audit failure. Audit failure rolls back writes; internal details hidden in production."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ContentErrorResponse"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/CreateEventRequest"
     get:
       tags: ["Historical Events"]
       operationId: "listVillageHistoricalEvents"
@@ -104,6 +167,128 @@ paths:
         "429": { $ref: "#/components/responses/ContentTooManyRequests" }
         "500": { $ref: "#/components/responses/ContentInternalError" }
   /api/v1/events/{id}:
+    delete:
+      "tags": ["Historical Events"]
+      "operationId": "deleteHistoricalEvent"
+      "summary": "Soft delete a historical event"
+      "description": "ADMIN only. No request body. Sets deletedAt/updater and preserves the physical row, version and relationships. Locks the event before reading its audit snapshot. One HistoricalEvent DELETE audit commits atomically. Public GET/list exclude deleted events. Repeated deletion returns 404."
+      "security": [{"EventsBearerAuth":[]}]
+      "x-allowed-roles": ["ADMIN"]
+      "parameters": [{"$ref":"#/components/parameters/ContentId"}]
+      "responses":
+        "204":
+          "description": "Event soft-deleted; empty response body."
+        "400":
+          "description": "VALIDATION_ERROR: invalid event UUID. If a JSON body is supplied, the global parser rejects malformed JSON with INVALID_JSON; this operation has no request body."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ContentErrorResponse"
+        "401":
+          "description": "UNAUTHORIZED: missing, invalid, expired or unsupported-role bearer token."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ContentErrorResponse"
+        "403":
+          "description": "FORBIDDEN: EDITOR and REVIEWER cannot delete, regardless of ownership/status."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ContentErrorResponse"
+        "404":
+          "description": "NOT_FOUND: missing/deleted event or parent village, including repeated deletion."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ContentErrorResponse"
+        "413":
+          "description": "PAYLOAD_TOO_LARGE: supplied JSON body exceeds the global 1 MB limit."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ContentErrorResponse"
+        "429":
+          "description": "TOO_MANY_REQUESTS: global rate limit exceeded when enabled."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ContentErrorResponse"
+        "500":
+          "description": "INTERNAL_ERROR: unexpected database/audit failure. Audit failure rolls back writes; internal details hidden in production."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ContentErrorResponse"
+    patch:
+      "tags": ["Historical Events"]
+      "operationId": "updateHistoricalEvent"
+      "summary": "Partially update a historical event"
+      "description": "EDITOR may edit only their own PENDING event; REVIEWER and ADMIN may edit any active event. Requires current version plus an editable field. Omitted fields are preserved. A changed non-null sourceId is revalidated; null removes the source link. Every accepted edit resets PENDING, increments version once, sets updater and records exactly one HistoricalEvent UPDATE audit with before/after snapshots atomically."
+      "security": [{"EventsBearerAuth":[]}]
+      "x-allowed-roles": ["EDITOR","REVIEWER","ADMIN"]
+      "parameters": [{"$ref":"#/components/parameters/ContentId"}]
+      "responses":
+        "200":
+          "description": "Updated event: PENDING, version incremented exactly once."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/HistoricalEventResponse"
+        "400":
+          "description": "VALIDATION_ERROR: invalid UUID, missing/invalid version, no editable fields, invalid dates/types/ranges or unknown/protected fields. Malformed JSON returns INVALID_JSON."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ContentErrorResponse"
+        "401":
+          "description": "UNAUTHORIZED: missing, invalid, expired or unsupported-role bearer token."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ContentErrorResponse"
+        "403":
+          "description": "EVENT_EDIT_FORBIDDEN: EDITOR does not own the PENDING event, including no creator. CHANGE_REQUEST_REQUIRED: EDITOR edits a non-PENDING event. FORBIDDEN: disallowed role."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ContentErrorResponse"
+        "404":
+          "description": "NOT_FOUND: missing/deleted event, parent village or newly selected source. An unchanged source is not revalidated."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ContentErrorResponse"
+        "409":
+          "description": "VERSION_CONFLICT: stale version, including concurrent updates. Reload before retrying; details contain the current version."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ContentErrorResponse"
+        "413":
+          "description": "PAYLOAD_TOO_LARGE: supplied JSON body exceeds the global 1 MB limit."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ContentErrorResponse"
+        "429":
+          "description": "TOO_MANY_REQUESTS: global rate limit exceeded when enabled."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ContentErrorResponse"
+        "500":
+          "description": "INTERNAL_ERROR: unexpected database/audit failure. Audit failure rolls back writes; internal details hidden in production."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ContentErrorResponse"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/UpdateEventRequest"
     get:
       tags: ["Historical Events"]
       operationId: "getHistoricalEvent"
@@ -142,6 +327,8 @@ paths:
         "429": { $ref: "#/components/responses/ContentTooManyRequests" }
         "500": { $ref: "#/components/responses/ContentInternalError" }
 components:
+  securitySchemes:
+    EventsBearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
   parameters:
     ContentVillageId:
       name: "villageId"
@@ -183,6 +370,92 @@ components:
         enum: ["asc", "desc"]
         default: "asc"
   schemas:
+    CreateEventRequest:
+      "type": "object"
+      "additionalProperties": false
+      "required": ["title"]
+      "properties":
+        "title":
+          "type": "string"
+          "minLength": 1
+          "maxLength": 200
+          "description": "Trimmed; nonblank."
+        "description":
+          "type": "string"
+          "maxLength": 5000
+          "nullable": true
+          "description": "Trimmed; empty allowed."
+        "category":
+          "type": "string"
+          "minLength": 1
+          "maxLength": 100
+          "nullable": true
+          "description": "Trimmed free text, not an enum; use null to clear."
+        "sourceId":
+          "type": "string"
+          "format": "uuid"
+          "nullable": true
+        "eventYear":
+          "type": "integer"
+          "format": "int32"
+          "minimum": -2147483648
+          "maximum": 2147483647
+          "nullable": true
+          "description": "Independent historical year; negatives and zero accepted. No year is inferred from eventDate."
+        "eventDate":
+          "type": "string"
+          "format": "date-time"
+          "nullable": true
+          "description": "Valid ISO date-time with Z or numeric timezone offset; normalized UTC year must be 0001 through 9999. Date-only and timezone-less inputs are rejected. Returned as UTC with millisecond precision. For BCE use eventYear."
+        "isApproximate":
+          "type": "boolean"
+          "default": false
+      "description": "Only title is required. Optional nullable fields may be omitted or null. No client version accepted. No date/year consistency, historical-period or title-uniqueness rule is imposed by the model."
+    UpdateEventRequest:
+      "type": "object"
+      "additionalProperties": false
+      "required": ["version"]
+      "minProperties": 2
+      "properties":
+        "title":
+          "type": "string"
+          "minLength": 1
+          "maxLength": 200
+          "description": "Trimmed; nonblank."
+        "description":
+          "type": "string"
+          "maxLength": 5000
+          "nullable": true
+          "description": "Trimmed; empty allowed."
+        "category":
+          "type": "string"
+          "minLength": 1
+          "maxLength": 100
+          "nullable": true
+          "description": "Trimmed free text, not an enum; use null to clear."
+        "sourceId":
+          "type": "string"
+          "format": "uuid"
+          "nullable": true
+        "eventYear":
+          "type": "integer"
+          "format": "int32"
+          "minimum": -2147483648
+          "maximum": 2147483647
+          "nullable": true
+          "description": "Independent historical year; negatives and zero accepted. No year is inferred from eventDate."
+        "eventDate":
+          "type": "string"
+          "format": "date-time"
+          "nullable": true
+          "description": "Valid ISO date-time with Z or numeric timezone offset; normalized UTC year must be 0001 through 9999. Date-only and timezone-less inputs are rejected. Returned as UTC with millisecond precision. For BCE use eventYear."
+        "isApproximate":
+          "type": "boolean"
+        "version":
+          "type": "integer"
+          "minimum": 1
+          "maximum": 2147483646
+      "description": "Current version plus at least one editable field. Omitted fields preserved (including isApproximate). Description, category, sourceId, eventYear and eventDate may be cleared with null."
     ContentVerificationStatus:
       type: "string"
       enum: ["PENDING", "VERIFIED", "REJECTED"]
@@ -240,7 +513,7 @@ components:
         version: { type: "integer" }
         createdAt: { type: "string", format: "date-time" }
         updatedAt: { type: "string", format: "date-time" }
-      description: "Public representation shared by list and detail responses. Nullable properties are returned as null; creator/updater IDs and deletedAt are not exposed."
+      description: "Public representation shared by GET, POST and PATCH responses. Nullable properties are returned as null; creator/updater IDs and deletedAt are not exposed."
       example:
         id: "22222222-2222-4222-8222-222222222222"
         villageId: "11111111-1111-4111-8111-111111111111"
