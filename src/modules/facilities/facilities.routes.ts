@@ -3,7 +3,7 @@ import { authenticate } from '../../shared/middlewares/authenticate.js';
 import { requireRole } from '../../shared/middlewares/requireRole.js';
 import { validate } from '../../shared/middlewares/validate.js';
 import * as controller from './facilities.controller.js';
-import { createFacilitySchema, facilitiesParamsSchema, listFacilitiesQuerySchema, villageFacilitiesParamsSchema } from './facilities.schemas.js';
+import { createFacilitySchema, updateFacilitySchema, facilitiesParamsSchema, listFacilitiesQuerySchema, villageFacilitiesParamsSchema } from './facilities.schemas.js';
 
 export const villageFacilitiesRouter = Router({ mergeParams: true });
 export const facilitiesRouter = Router();
@@ -23,3 +23,7 @@ villageFacilitiesRouter.get(
 );
 
 facilitiesRouter.get('/:id', validate({ params: facilitiesParamsSchema }), controller.getById);
+facilitiesRouter.patch('/:id', authenticate, requireRole('EDITOR', 'REVIEWER', 'ADMIN'),
+  validate({ params: facilitiesParamsSchema, body: updateFacilitySchema }), controller.update);
+facilitiesRouter.delete('/:id', authenticate, requireRole('ADMIN'),
+  validate({ params: facilitiesParamsSchema }), controller.remove);

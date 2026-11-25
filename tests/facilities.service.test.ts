@@ -17,6 +17,10 @@ const item: FacilitiesDetails = {
 
 describe('FacilitiesService', () => {
   const repo = {
+    findForWrite: vi.fn<FacilitiesRepository['findForWrite']>(),
+    lock: vi.fn<FacilitiesRepository['lock']>(),
+    updateIfVersion: vi.fn<FacilitiesRepository['updateIfVersion']>(),
+    softDelete: vi.fn<FacilitiesRepository['softDelete']>(),
     transaction: vi.fn<FacilitiesRepository['transaction']>(),
     create: vi.fn<FacilitiesRepository['create']>(),
     findMany: vi.fn<FacilitiesRepository['findMany']>(),
