@@ -1,6 +1,6 @@
 import type { EconomicCategory, EconomicActivity, Prisma, VerificationStatus } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
-import type { CreateEconomyInput, EconomySortField, SortOrder } from './economy.schemas.js';
+import type { CreateEconomyInput, UpdateEconomyInput, EconomySortField, SortOrder } from './economy.schemas.js';
 
 export interface EconomyCreateContext {
   actorId: string;
@@ -28,6 +28,10 @@ export interface EconomyListParams {
 }
 
 export interface EconomyRepository {
+  findForWrite(id: string, client: Prisma.TransactionClient): Promise<EconomyWriteRecord | null>;
+  lock(id: string, client: Prisma.TransactionClient): Promise<void>;
+  updateIfVersion(id: string, input: UpdateEconomyInput, actorId: string, client: Prisma.TransactionClient): Promise<number>;
+  softDelete(id: string, actorId: string, client: Prisma.TransactionClient): Promise<number>;
   transaction<T>(fn: (client: Prisma.TransactionClient) => Promise<T>): Promise<T>;
   create(villageId: string, input: CreateEconomyInput, context: EconomyCreateContext, client: Prisma.TransactionClient): Promise<EconomyDetails>;
   /** Null means the parent is missing/deleted; an empty list means no matching items. */
@@ -35,6 +39,8 @@ export interface EconomyRepository {
   /** Only active items belonging to active villages are visible. */
   findById(id: string): Promise<EconomyDetails | null>;
 }
+
+export type EconomyWriteRecord = EconomyDetails & Pick<EconomicActivity, 'createdById' | 'updatedById' | 'deletedAt'>;
 
 const economySelect = {
   id: true,
@@ -86,6 +92,29 @@ function buildOrderBy({ field, order }: EconomyListParams['sort']): Prisma.Econo
 }
 
 export const economyRepository: EconomyRepository = {
+  findForWrite(id, client) {
+    return client.economicActivity.findFirst({
+      where: { id, village: { deletedAt: null } },
+      select: { ...economySelect, createdById: true, updatedById: true, deletedAt: true },
+    });
+  },
+  async lock(id, client) {
+    await client.$queryRaw`SELECT id FROM economic_activities WHERE id = ${id}::uuid FOR UPDATE`;
+  },
+  async updateIfVersion(id, input, actorId, client) {
+    const { version, ...changes } = input;
+    const result = await client.economicActivity.updateMany({
+      where: { ...activeEconomy, id, version },
+      data: { ...changes, verificationStatus: 'PENDING', updatedById: actorId, version: { increment: 1 } },
+    });
+    return result.count;
+  },
+  async softDelete(id, actorId, client) {
+    const result = await client.economicActivity.updateMany({
+      where: { ...activeEconomy, id }, data: { deletedAt: new Date(), updatedById: actorId },
+    });
+    return result.count;
+  },
   transaction(fn) {
     return prisma.$transaction(fn);
   },

@@ -43,6 +43,18 @@ export const createEconomySchema = z.strictObject({
 });
 
 export type CreateEconomyInput = z.infer<typeof createEconomySchema>;
+export const updateEconomySchema = z.strictObject({
+  version: z.number().int().positive().max(2147483646),
+  name: createEconomySchema.shape.name.optional(),
+  category: createEconomySchema.shape.category.optional(),
+  sourceId: createEconomySchema.shape.sourceId.optional(),
+  description: z.string().trim().max(5000).nullable().optional(),
+  isMajor: z.boolean().optional(),
+  asOfYear: createEconomySchema.shape.asOfYear,
+}).refine(value => Object.entries(value).some(([key, field]) => key !== 'version' && field !== undefined), {
+  message: 'At least one editable field is required',
+});
+export type UpdateEconomyInput = z.infer<typeof updateEconomySchema>;
 export type VillageEconomyParams = z.infer<typeof villageEconomyParamsSchema>;
 export type EconomyParams = z.infer<typeof economyParamsSchema>;
 export type ListEconomyQuery = z.infer<typeof listEconomyQuerySchema>;

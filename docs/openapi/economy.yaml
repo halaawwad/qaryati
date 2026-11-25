@@ -1,12 +1,75 @@
 openapi: "3.0.3"
-info: { title: "Qaryati API - Economy", version: "1.0.0", description: "Both GET APIs and their route mounts are on feature/economy and absent from the documentation branch. This standalone file documents the implemented routes, not deployment availability. Paths include /api/v1, so use a server origin without that prefix. Public GET operations require no authentication. Every response carries X-Request-Id. All operations are subject to the configured global rate limit (429)." }
+info: { title: "Qaryati API - Economy", version: "1.1.0", description: "Economy and agriculture read, create, update and soft-delete APIs. Paths include /api/v1; use a server origin without that prefix. GET operations are public; writes require Bearer tokens. Every response carries X-Request-Id. All operations are subject to the global rate limit (429). See docs/economy.md for domain rules and manual examples." }
 servers:
   - { url: "/", description: "Current API origin; replace with the target server origin when importing." }
 tags:
   - { name: "Economy", description: "Economy APIs." }
-x-implementation-source: { ref: "feature/economy", commit: "3eea844fbe557ff97ab7f17050a3eac705f24342", module: "src/modules/economy/", tests: "tests/economy*.test.ts" }
+x-implementation-source: { module: "src/modules/economy/", tests: "tests/economy*.test.ts" }
 paths:
   /api/v1/villages/{villageId}/economy:
+    post:
+      "tags": ["Economy"]
+      "operationId": "createEconomicActivity"
+      "summary": "Create an economic activity"
+      "description": "EDITOR, REVIEWER and ADMIN may create. Requires an active village and source. Creates PENDING/version 1 and assigns creator/updater from token. Creation and one EconomicActivity CREATE audit commit together. Source status is unrestricted."
+      "security": [{"EconomyBearerAuth":[]}]
+      "x-allowed-roles": ["EDITOR","REVIEWER","ADMIN"]
+      "parameters": [{"$ref":"#/components/parameters/ContentVillageId"}]
+      "responses":
+        "201":
+          "description": "Created activity with verificationStatus PENDING and server-assigned version 1."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/EconomicActivityResponse"
+        "400":
+          "description": "VALIDATION_ERROR: invalid village UUID, missing name/category/sourceId, invalid field types/ranges, or unknown/protected body fields. Malformed JSON returns INVALID_JSON."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ContentErrorResponse"
+        "401":
+          "description": "UNAUTHORIZED: missing, invalid, expired or unsupported-role Bearer token."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ContentErrorResponse"
+        "403":
+          "description": "FORBIDDEN if the authenticated role is not allowed by the route. All currently supported roles (EDITOR, REVIEWER, ADMIN) may create; there is no ownership restriction. Unsupported token roles return 401."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ContentErrorResponse"
+        "404":
+          "description": "NOT_FOUND: the village or required source does not exist or is soft-deleted."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ContentErrorResponse"
+        "413":
+          "description": "PAYLOAD_TOO_LARGE: JSON exceeds 1 MB."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ContentErrorResponse"
+        "429":
+          "description": "TOO_MANY_REQUESTS: global rate limit exceeded."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ContentErrorResponse"
+        "500":
+          "description": "INTERNAL_ERROR: database/audit failure rolls back writes; internal details are not exposed in production."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ContentErrorResponse"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/CreateEconomyRequest"
     get:
       tags: ["Economy"]
       operationId: "listVillageEconomicActivities"
@@ -97,10 +160,138 @@ paths:
         "429": { $ref: "#/components/responses/ContentTooManyRequests" }
         "500": { $ref: "#/components/responses/ContentInternalError" }
   /api/v1/economy/{id}:
+    patch:
+      "tags": ["Economy"]
+      "operationId": "updateEconomicActivity"
+      "summary": "Partially update an economic activity"
+      "description": "EDITOR may edit only their own PENDING record; REVIEWER/ADMIN any active record. Requires current version and an editable field. Omitted fields are preserved. Changed sources must be active. Every accepted edit resets PENDING, increments version once, sets updater and writes one UPDATE audit atomically. Audit failure rolls back the update."
+      "security": [{"EconomyBearerAuth":[]}]
+      "x-allowed-roles": ["EDITOR","REVIEWER","ADMIN"]
+      "parameters": [{"$ref":"#/components/parameters/ContentId"}]
+      "responses":
+        "200":
+          "description": "Updated activity with verificationStatus PENDING and version incremented exactly once."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/EconomicActivityResponse"
+        "400":
+          "description": "VALIDATION_ERROR: invalid UUID/body, missing version, no editable fields, invalid ranges/types or protected fields. Malformed JSON returns INVALID_JSON."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ContentErrorResponse"
+        "401":
+          "description": "UNAUTHORIZED: missing, invalid, expired or unsupported-role Bearer token."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ContentErrorResponse"
+        "403":
+          "description": "CHANGE_REQUEST_REQUIRED when an EDITOR edits a non-PENDING record; ECONOMY_EDIT_FORBIDDEN when an EDITOR edits a PENDING record created by another user or with no creator. REVIEWER and ADMIN may edit any active record. FORBIDDEN if the authenticated role is not allowed."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ContentErrorResponse"
+        "404":
+          "description": "NOT_FOUND: the activity or parent village does not exist or is soft-deleted, or a newly selected source does not exist or is soft-deleted. An unchanged source is not revalidated."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ContentErrorResponse"
+        "409":
+          "description": "VERSION_CONFLICT: reload before retrying; details contain the current version."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ContentErrorResponse"
+              "example":
+                "error":
+                  "code": "VERSION_CONFLICT"
+                  "message": "The economic activity was changed by someone else; reload it and retry"
+                  "details": [{"field":"version","message":"Current version is 2"}]
+                  "requestId": "example-request"
+        "413":
+          "description": "PAYLOAD_TOO_LARGE: JSON exceeds 1 MB."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ContentErrorResponse"
+        "429":
+          "description": "TOO_MANY_REQUESTS: global rate limit exceeded."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ContentErrorResponse"
+        "500":
+          "description": "INTERNAL_ERROR: database/audit failure rolls back writes; internal details are not exposed in production."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ContentErrorResponse"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/UpdateEconomyRequest"
+    delete:
+      "tags": ["Economy"]
+      "operationId": "deleteEconomicActivity"
+      "summary": "Soft delete an economic activity"
+      "description": "ADMIN only. This operation has no request body. Sets deletedAt/updater; preserves row, version and relations. One DELETE audit shares the transaction. Repeated deletion returns 404. Public reads exclude deleted records."
+      "security": [{"EconomyBearerAuth":[]}]
+      "x-allowed-roles": ["ADMIN"]
+      "parameters": [{"$ref":"#/components/parameters/ContentId"}]
+      "responses":
+        "204":
+          "description": "Activity soft-deleted; empty response body."
+        "400":
+          "description": "VALIDATION_ERROR: invalid activity UUID. If a JSON body is sent despite this operation having no request body, the global JSON parser can return INVALID_JSON for malformed JSON."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ContentErrorResponse"
+        "401":
+          "description": "UNAUTHORIZED: missing, invalid, expired or unsupported-role Bearer token."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ContentErrorResponse"
+        "403":
+          "description": "FORBIDDEN: only ADMIN may delete. EDITOR and REVIEWER are denied, regardless of ownership or verification status."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ContentErrorResponse"
+        "404":
+          "description": "NOT_FOUND: the activity or parent village does not exist or is soft-deleted. Repeated deletion also returns 404."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ContentErrorResponse"
+        "413":
+          "description": "PAYLOAD_TOO_LARGE: a supplied JSON body exceeds the global 1 MB limit. This operation has no request body."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ContentErrorResponse"
+        "429":
+          "description": "TOO_MANY_REQUESTS: global rate limit exceeded."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ContentErrorResponse"
+        "500":
+          "description": "INTERNAL_ERROR: database/audit failure rolls back writes; internal details are not exposed in production."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ContentErrorResponse"
     get:
       tags: ["Economy"]
       operationId: "getEconomicActivity"
-      summary: "Get a economic activity"
+      summary: "Get an economic activity"
       description: "Only non-deleted records belonging to a non-deleted village are visible. PENDING, VERIFIED and REJECTED records are public. Source deletion does not hide records."
       security: []
       parameters:
@@ -134,6 +325,8 @@ paths:
         "429": { $ref: "#/components/responses/ContentTooManyRequests" }
         "500": { $ref: "#/components/responses/ContentInternalError" }
 components:
+  securitySchemes:
+    EconomyBearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
   parameters:
     ContentVillageId:
       name: "villageId"
@@ -175,6 +368,66 @@ components:
         enum: ["asc", "desc"]
         default: "asc"
   schemas:
+    CreateEconomyRequest:
+      "type": "object"
+      "additionalProperties": false
+      "required": ["name","category","sourceId"]
+      "properties":
+        "name":
+          "type": "string"
+          "minLength": 1
+          "maxLength": 200
+          "description": "Trimmed; nonblank."
+        "category":
+          "$ref": "#/components/schemas/EconomicCategory"
+        "sourceId":
+          "type": "string"
+          "format": "uuid"
+        "description":
+          "type": "string"
+          "maxLength": 5000
+          "description": "Trimmed; empty allowed."
+        "isMajor":
+          "type": "boolean"
+          "default": false
+        "asOfYear":
+          "type": "integer"
+          "minimum": -2147483648
+          "maximum": 2147483647
+          "nullable": true
+    UpdateEconomyRequest:
+      "type": "object"
+      "additionalProperties": false
+      "required": ["version"]
+      "minProperties": 2
+      "description": "Omitted fields preserved; description/year can be null, source cannot be removed. Unchanged sources are not revalidated. IDs, actor fields, status and timestamps are protected."
+      "properties":
+        "name":
+          "type": "string"
+          "minLength": 1
+          "maxLength": 200
+          "description": "Trimmed; nonblank."
+        "category":
+          "$ref": "#/components/schemas/EconomicCategory"
+        "sourceId":
+          "type": "string"
+          "format": "uuid"
+        "description":
+          "type": "string"
+          "maxLength": 5000
+          "description": "Trimmed; empty allowed."
+          "nullable": true
+        "isMajor":
+          "type": "boolean"
+        "asOfYear":
+          "type": "integer"
+          "minimum": -2147483648
+          "maximum": 2147483647
+          "nullable": true
+        "version":
+          "type": "integer"
+          "minimum": 1
+          "maximum": 2147483646
     ContentVerificationStatus:
       type: "string"
       enum: ["PENDING", "VERIFIED", "REJECTED"]
@@ -228,7 +481,7 @@ components:
         createdAt: { type: "string", format: "date-time" }
         updatedAt: { type: "string", format: "date-time" }
         asOfYear: { type: "integer", format: "int32", minimum: -2147483648, maximum: 2147483647, nullable: true }
-      description: "Public representation shared by list and detail responses. Nullable properties are returned as null; creator/updater IDs and deletedAt are not exposed."
+      description: "Public representation shared by GET, POST and PATCH responses. Nullable properties are returned as null; creator/updater IDs and deletedAt are not exposed."
       example:
         id: "22222222-2222-4222-8222-222222222222"
         villageId: "11111111-1111-4111-8111-111111111111"

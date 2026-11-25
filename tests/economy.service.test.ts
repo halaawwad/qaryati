@@ -16,6 +16,10 @@ const item: EconomyDetails = {
 
 describe('EconomyService', () => {
   const repo = {
+    findForWrite: vi.fn<EconomyRepository['findForWrite']>(),
+    lock: vi.fn<EconomyRepository['lock']>(),
+    updateIfVersion: vi.fn<EconomyRepository['updateIfVersion']>(),
+    softDelete: vi.fn<EconomyRepository['softDelete']>(),
     transaction: vi.fn<EconomyRepository['transaction']>(),
     create: vi.fn<EconomyRepository['create']>(),
     findMany: vi.fn<EconomyRepository['findMany']>(),

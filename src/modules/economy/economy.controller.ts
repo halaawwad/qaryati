@@ -2,6 +2,24 @@ import type { RequestHandler } from 'express';
 import type { EconomyParams, ListEconomyQuery, VillageEconomyParams } from './economy.schemas.js';
 import { economyService } from './economy.service.js';
 
+export const update: RequestHandler = async (req, res, next) => {
+  try {
+    const item = await economyService.update(req.params.id as string, req.body, {
+      actorId: req.user.id, role: req.user.role, requestId: req.requestId,
+    });
+    res.status(200).json({ data: item });
+  } catch (error) { next(error); }
+};
+
+export const remove: RequestHandler = async (req, res, next) => {
+  try {
+    await economyService.remove(req.params.id as string, {
+      actorId: req.user.id, role: req.user.role, requestId: req.requestId,
+    });
+    res.status(204).send();
+  } catch (error) { next(error); }
+};
+
 export const create: RequestHandler = async (req, res, next) => {
   try {
     const { villageId } = req.params as VillageEconomyParams;
