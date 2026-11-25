@@ -8,8 +8,16 @@ export interface PopulationListParams {
  villageId: string; filters: { referenceYear?: number; sourceId?: string; isEstimate?: boolean; isPreferred?: boolean; needsReview?: boolean; verificationStatus?: VerificationStatus };
  sort: { field: 'referenceYear' | 'population' | 'createdAt' | 'updatedAt'; order: 'asc' | 'desc' }; skip: number; take: number;
 }
-type DeleteSnapshot = PopulationDetails & Pick<PopulationRecord, 'createdById' | 'updatedById' | 'verifiedById' | 'verifiedAt'>;
-export interface PopulationRepository { transaction<T>(fn: (client: Prisma.TransactionClient) => Promise<T>): Promise<T>; findLatestVerified(villageId: string, client: Prisma.TransactionClient, excludeId?: string): Promise<{population: number} | null>; create(villageId: string, input: CreatePopulationInput, needsReview: boolean, context: PopulationCreateContext, client: Prisma.TransactionClient): Promise<PopulationDetails>; findForUpdate(id: string, client: Prisma.TransactionClient): Promise<(PopulationDetails & {createdById: string | null}) | null>; findForDelete(id: string, client: Prisma.TransactionClient): Promise<DeleteSnapshot | null>; review(id: string, expectedVersion: number, currentStatus: VerificationStatus, target: 'VERIFIED' | 'REJECTED', actorId: string, client: Prisma.TransactionClient): Promise<DeleteSnapshot>; softDelete(id: string, actorId: string, client: Prisma.TransactionClient): Promise<DeleteSnapshot & {deletedAt: Date | null}>; update(id: string, input: UpdatePopulationInput, actorId: string, client: Prisma.TransactionClient, needsReview?: boolean): Promise<PopulationDetails>; findMany(params: PopulationListParams): Promise<{ items: PopulationDetails[]; total: number }>; findById(id: string): Promise<PopulationDetails | null> }
+export interface PreferredRepository {
+ preferredTransaction<T>(fn: (client: Prisma.TransactionClient) => Promise<T>): Promise<T>;
+ lockPreferredGroup(villageId: string, year: number, client: Prisma.TransactionClient): Promise<void>;
+ findPreferredSlot(villageId: string, year: number, client: Prisma.TransactionClient): Promise<(PopulationSnapshot & {deletedAt: Date | null}) | null>;
+ lockPreferredRows(ids: string[], client: Prisma.TransactionClient): Promise<Array<PopulationSnapshot & {deletedAt: Date | null}>>;
+ setPreferred(id: string, expectedVersion: number, expectedPreferred: boolean, actorId: string, client: Prisma.TransactionClient): Promise<PopulationSnapshot>;
+}
+export type PopulationSnapshot = PopulationDetails & Pick<PopulationRecord, 'createdById' | 'updatedById' | 'verifiedById' | 'verifiedAt'>;
+type DeleteSnapshot = PopulationSnapshot;
+export interface PopulationRepository extends PreferredRepository { transaction<T>(fn: (client: Prisma.TransactionClient) => Promise<T>): Promise<T>; findLatestVerified(villageId: string, client: Prisma.TransactionClient, excludeId?: string): Promise<{population: number} | null>; create(villageId: string, input: CreatePopulationInput, needsReview: boolean, context: PopulationCreateContext, client: Prisma.TransactionClient): Promise<PopulationDetails>; findForUpdate(id: string, client: Prisma.TransactionClient): Promise<(PopulationDetails & {createdById: string | null}) | null>; findForDelete(id: string, client: Prisma.TransactionClient): Promise<DeleteSnapshot | null>; review(id: string, expectedVersion: number, currentStatus: VerificationStatus, target: 'VERIFIED' | 'REJECTED', actorId: string, client: Prisma.TransactionClient): Promise<DeleteSnapshot>; softDelete(id: string, actorId: string, client: Prisma.TransactionClient): Promise<DeleteSnapshot & {deletedAt: Date | null}>; update(id: string, input: UpdatePopulationInput, actorId: string, client: Prisma.TransactionClient, needsReview?: boolean): Promise<PopulationDetails>; findMany(params: PopulationListParams): Promise<{ items: PopulationDetails[]; total: number }>; findById(id: string): Promise<PopulationDetails | null> }
 const select = { id: true, villageId: true, population: true, referenceYear: true, referenceDate: true, sourceId: true, isEstimate: true, isPreferred: true, needsReview: true, notes: true, verificationStatus: true, version: true, createdAt: true, updatedAt: true } satisfies Prisma.PopulationRecordSelect;
 const deleteSelect = {...select, createdById: true, updatedById: true, verifiedById: true, verifiedAt: true} satisfies Prisma.PopulationRecordSelect;
 const active = { deletedAt: null, village: { deletedAt: null } } satisfies Prisma.PopulationRecordWhereInput;
@@ -28,8 +36,41 @@ function isPreferredIndexConflict(error: unknown): boolean {
   (error.meta?.modelName === undefined || error.meta.modelName === 'PopulationRecord') &&
   error.meta?.target === 'population_records_one_preferred_per_year_idx';
 }
+// PostgreSQL reports the partial preferred index as its two indexed columns via Prisma.
+function isIdentifiedPreferredIndexConflict(error: unknown): boolean {
+ if (isPreferredIndexConflict(error)) return true;
+ if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002' || error.meta?.modelName !== 'PopulationRecord') return false;
+ const target = error.meta.target;
+ return Array.isArray(target) && target.length === 2 && target.every(field => typeof field === 'string') &&
+  [...target].sort().join(',') === ['village_id','reference_year'].sort().join(',');
+}
 export const populationRepository: PopulationRepository = {
  transaction(fn) { return prisma.$transaction(fn); },
+ preferredTransaction(fn) { return prisma.$transaction(fn, {isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted}); },
+ async lockPreferredGroup(villageId, year, client) {
+  // Namespaced 64-bit hash: collisions only serialize unrelated groups.
+  const key = `qaryati:population:preferred:${villageId.toLowerCase()}:${year}`;
+  await client.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))::text`;
+ },
+ findPreferredSlot(villageId, year, client) {
+  // Include deleted rows: the partial unique index includes them too.
+  return client.populationRecord.findFirst({where:{villageId,referenceYear:year,isPreferred:true},select:{...deleteSelect,deletedAt:true}});
+ },
+ async lockPreferredRows(ids, client) {
+  const ordered=[...new Set(ids)].sort();
+  if (!ordered.length) return [];
+  await client.$queryRaw`SELECT id FROM population_records WHERE id IN (${Prisma.join(ordered.map(id=>Prisma.sql`${id}::uuid`))}) ORDER BY id FOR UPDATE`;
+  return client.populationRecord.findMany({where:{id:{in:ordered}},select:{...deleteSelect,deletedAt:true}});
+ },
+ async setPreferred(id, expectedVersion, expectedPreferred, actorId, client) {
+  try {
+   return await client.populationRecord.update({where:{id,deletedAt:null,version:expectedVersion,isPreferred:expectedPreferred},data:{isPreferred:!expectedPreferred,updatedById:actorId,version:{increment:1}},select:deleteSelect});
+  } catch(error) {
+   if (isIdentifiedPreferredIndexConflict(error)) throw new ConflictError('Population preferred record conflicts with an existing record');
+   if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') throw new ConflictError('Population record changed during selection');
+   throw error;
+  }
+ },
  async findForUpdate(id, client) {
   const rows = await client.$queryRaw<{id: string}[]>`SELECT id FROM population_records WHERE id = ${id}::uuid AND deleted_at IS NULL FOR UPDATE`;
   if (!rows.length) return null;
@@ -67,7 +108,7 @@ export const populationRepository: PopulationRepository = {
   try {
    return await client.populationRecord.update({where: {id, deletedAt: null, version: expectedVersion}, data: {population, referenceYear, sourceId, isEstimate, notes, ...(needsReview !== undefined ? {needsReview} : {}), ...(referenceDate !== undefined ? {referenceDate: referenceDate === null ? null : new Date(referenceDate)} : {}), updatedById: actorId, version: {increment: 1}}, select});
   } catch (error) {
-   if (isPopulationBusinessKeyConflict(error) || isPreferredIndexConflict(error)) throw new ConflictError('Population record conflicts with an existing record');
+   if (isPopulationBusinessKeyConflict(error) || isIdentifiedPreferredIndexConflict(error)) throw new ConflictError('Population record conflicts with an existing record');
    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') throw new ConflictError('Population record changed during update');
    throw error;
   }
