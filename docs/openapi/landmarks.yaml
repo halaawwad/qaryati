@@ -1,10 +1,10 @@
 openapi: "3.0.3"
-info: { title: "Qaryati API - Landmarks", version: "1.0.0", description: "GET behavior matches the documentation branch. POST is implemented only on feature/landmarks-create among the inspected branches. This standalone file documents the implemented routes, not deployment availability. Paths include /api/v1, so use a server origin without that prefix. Public GET operations require no authentication. Every response carries X-Request-Id. All operations are subject to the configured global rate limit (429)." }
+info: { title: "Qaryati API - Landmarks", version: "1.1.0", description: "Implemented Landmarks read, create, update and soft-delete routes. Paths include /api/v1, so use a server origin without that prefix. Public GET operations require no authentication. Every response carries X-Request-Id. All operations are subject to the configured global rate limit (429). See docs/landmarks.md for Postman examples and domain restrictions." }
 servers:
   - { url: "/", description: "Current API origin; replace with the target server origin when importing." }
 tags:
   - { name: "Landmarks", description: "Landmarks APIs." }
-x-implementation-source: { ref: "feature/landmarks-create", commit: "8df069b78cbc5ff2e217e7ac94000e0651ac0aa6", module: "src/modules/landmarks/", tests: "tests/landmarks*.test.ts" }
+x-implementation-source: { module: "src/modules/landmarks/", tests: "tests/landmarks*.test.ts" }
 paths:
   /api/v1/villages/{villageId}/landmarks:
     get:
@@ -184,6 +184,54 @@ paths:
         "404": { $ref: "#/components/responses/LandmarkNotFound" }
         "429": { $ref: "#/components/responses/ContentTooManyRequests" }
         "500": { $ref: "#/components/responses/ContentInternalError" }
+    patch:
+      tags: ["Landmarks"]
+      operationId: "updateLandmark"
+      summary: "Partially update a landmark"
+      description: "EDITOR may edit only their own PENDING record. REVIEWER and ADMIN may edit any active record. The parent village must be active. Requires current version and at least one editable field; unknown fields are rejected. Edits increment version and reset status to PENDING, including same-value edits. Replacement sources must be active; an unchanged source is not revalidated. Audit and update commit together. No relocation, source removal or direct status changes."
+      security: [{ LandmarkBearerAuth: [] }]
+      x-allowed-roles: ["EDITOR", "REVIEWER", "ADMIN"]
+      parameters: [{ $ref: "#/components/parameters/ContentId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateLandmarkRequest" }
+            example: { version: 1, nameEn: "Village Spring", description: "Updated documentation." }
+      responses:
+        "200":
+          description: "Updated public landmark representation."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LandmarkResponse" }
+        "400": { $ref: "#/components/responses/LandmarkUpdateValidationError" }
+        "401": { $ref: "#/components/responses/LandmarkUnauthorized" }
+        "403": { $ref: "#/components/responses/LandmarkWriteForbidden" }
+        "404":
+          description: "Landmark, parent village or replacement source is missing or soft-deleted (NOT_FOUND)."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ContentErrorResponse" }
+        "409": { $ref: "#/components/responses/LandmarkVersionConflict" }
+        "413": { $ref: "#/components/responses/LandmarkPayloadTooLarge" }
+        "429": { $ref: "#/components/responses/ContentTooManyRequests" }
+        "500": { $ref: "#/components/responses/ContentInternalError" }
+    delete:
+      tags: ["Landmarks"]
+      operationId: "deleteLandmark"
+      summary: "Soft delete a landmark (ADMIN only)"
+      description: "Sets deletedAt and updatedById, preserves version and relations, and records a DELETE audit in the same transaction. No request body or version is required. Missing/deleted records or a deleted parent return 404, including repeated deletion. The record disappears from public reads."
+      security: [{ LandmarkBearerAuth: [] }]
+      x-allowed-roles: ["ADMIN"]
+      parameters: [{ $ref: "#/components/parameters/ContentId" }]
+      responses:
+        "204": { description: "Deleted; empty response body." }
+        "400": { $ref: "#/components/responses/ContentIdValidationError" }
+        "401": { $ref: "#/components/responses/LandmarkUnauthorized" }
+        "403": { $ref: "#/components/responses/LandmarkWriteForbidden" }
+        "404": { $ref: "#/components/responses/LandmarkNotFound" }
+        "429": { $ref: "#/components/responses/ContentTooManyRequests" }
+        "500": { $ref: "#/components/responses/ContentInternalError" }
 components:
   parameters:
     ContentVillageId:
@@ -226,6 +274,21 @@ components:
         enum: ["asc", "desc"]
         default: "asc"
   schemas:
+    UpdateLandmarkRequest:
+      type: object
+      additionalProperties: false
+      required: [version]
+      minProperties: 2
+      description: "Text is trimmed. Coordinates must both be supplied as numbers or both null; omit both to preserve them. Name and type cannot be null. Source may be replaced but not removed."
+      properties:
+        version: { type: integer, minimum: 1, maximum: 2147483646 }
+        nameAr: { type: string, minLength: 1, maxLength: 200 }
+        nameEn: { type: string, minLength: 1, maxLength: 200, nullable: true }
+        landmarkType: { $ref: "#/components/schemas/LandmarkType" }
+        description: { type: string, maxLength: 5000, nullable: true }
+        latitude: { type: number, minimum: -90, maximum: 90, nullable: true }
+        longitude: { type: number, minimum: -180, maximum: 180, nullable: true }
+        sourceId: { type: string, format: uuid }
     ContentVerificationStatus:
       type: "string"
       enum: ["PENDING", "VERIFIED", "REJECTED"]
@@ -336,6 +399,27 @@ components:
               nullable: true
               enum: [null]
   responses:
+    LandmarkUpdateValidationError:
+      description: "Invalid UUID/body, missing or invalid version, no editable fields, unknown/protected fields, invalid text/type/source or unpaired/out-of-range coordinates (VALIDATION_ERROR). Malformed JSON returns INVALID_JSON."
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ContentErrorResponse" }
+    LandmarkWriteForbidden:
+      description: "FORBIDDEN for non-admin deletion; LANDMARK_EDIT_FORBIDDEN for another creator's pending landmark; CHANGE_REQUEST_REQUIRED for editor updates to VERIFIED/REJECTED records."
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ContentErrorResponse" }
+    LandmarkVersionConflict:
+      description: "Stale or concurrently changed version; reload and review before retrying."
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ContentErrorResponse" }
+          example:
+            error:
+              code: VERSION_CONFLICT
+              message: "The landmark was changed by someone else; reload it and retry"
+              details: [{ field: version, message: "Current version is 2" }]
+              requestId: example-request-123
     ContentValidationError:
       description: "Invalid path or query parameters (VALIDATION_ERROR); malformed JSON is INVALID_JSON when a JSON body is sent."
       headers:

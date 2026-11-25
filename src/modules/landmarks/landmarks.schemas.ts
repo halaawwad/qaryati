@@ -49,6 +49,25 @@ export const createLandmarkSchema = z.strictObject({
 });
 
 export type CreateLandmarkInput = z.infer<typeof createLandmarkSchema>;
+export const updateLandmarkSchema = z.strictObject({
+  version: z.number().int().positive().max(2147483646),
+  nameAr: z.string().trim().min(1).max(200).optional(),
+  nameEn: z.string().trim().min(1).max(200).nullable().optional(),
+  landmarkType: z.enum(LandmarkType).optional(),
+  description: z.string().trim().max(5000).nullable().optional(),
+  latitude: z.number().min(-90).max(90).nullable().optional(),
+  longitude: z.number().min(-180).max(180).nullable().optional(),
+  sourceId: z.uuid().optional(),
+}).superRefine((value, ctx) => {
+  if (!Object.entries(value).some(([key, item]) => key !== 'version' && item !== undefined)) {
+    ctx.addIssue({ code: 'custom', message: 'At least one editable field is required' });
+  }
+  const { latitude, longitude } = value;
+  if ((latitude === undefined) !== (longitude === undefined) || (latitude === null) !== (longitude === null)) {
+    ctx.addIssue({ code: 'custom', path: ['latitude'], message: 'Supply both coordinates as numbers or both as null' });
+  }
+});
+export type UpdateLandmarkInput = z.infer<typeof updateLandmarkSchema>;
 export type VillageLandmarksParams = z.infer<typeof villageLandmarksParamsSchema>;
 export type LandmarkParams = z.infer<typeof landmarkParamsSchema>;
 export type ListLandmarksQuery = z.infer<typeof listLandmarksQuerySchema>;

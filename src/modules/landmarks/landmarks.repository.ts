@@ -1,6 +1,6 @@
 import type { Landmark, LandmarkType, Prisma, VerificationStatus } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
-import type { CreateLandmarkInput, LandmarkSortField, SortOrder } from './landmarks.schemas.js';
+import type { CreateLandmarkInput, UpdateLandmarkInput, LandmarkSortField, SortOrder } from './landmarks.schemas.js';
 
 export interface LandmarkCreateContext {
   actorId: string;
@@ -29,6 +29,10 @@ export interface LandmarkListParams {
 }
 
 export interface LandmarkRepository {
+  lock(id: string, client: Prisma.TransactionClient): Promise<void>;
+  findForWrite(id: string, client: Prisma.TransactionClient): Promise<LandmarkWriteRecord | null>;
+  updateIfVersion(id: string, input: UpdateLandmarkInput, actorId: string, client: Prisma.TransactionClient): Promise<number>;
+  softDelete(id: string, actorId: string, client: Prisma.TransactionClient): Promise<number>;
   transaction<T>(fn: (client: Prisma.TransactionClient) => Promise<T>): Promise<T>;
   create(villageId: string, input: CreateLandmarkInput, context: LandmarkCreateContext, client: Prisma.TransactionClient): Promise<LandmarkDetails>;
   /** Null means the village is missing or deleted; an empty list means no matching landmarks. */
@@ -36,6 +40,8 @@ export interface LandmarkRepository {
   /** Only returns active landmarks belonging to active villages. */
   findById(id: string): Promise<LandmarkDetails | null>;
 }
+
+export type LandmarkWriteRecord = LandmarkDetails & Pick<Landmark, 'createdById' | 'updatedById' | 'deletedAt'>;
 
 const landmarkSelect = {
   id: true,
@@ -95,6 +101,30 @@ function buildOrderBy({ field, order }: LandmarkListParams['sort']): Prisma.Land
 }
 
 export const landmarkRepository: LandmarkRepository = {
+  async lock(id, client) {
+    await client.$queryRaw`SELECT id FROM landmarks WHERE id = ${id}::uuid FOR UPDATE`;
+  },
+  async findForWrite(id, client) {
+    const row = await client.landmark.findFirst({
+      where: { id, village: { deletedAt: null } },
+      select: { ...landmarkSelect, createdById: true, updatedById: true, deletedAt: true },
+    });
+    return row ? { ...toLandmark(row), createdById: row.createdById, updatedById: row.updatedById, deletedAt: row.deletedAt } : null;
+  },
+  async updateIfVersion(id, input, actorId, client) {
+    const { version, ...changes } = input;
+    const result = await client.landmark.updateMany({
+      where: { ...activeLandmark, id, version },
+      data: { ...changes, verificationStatus: 'PENDING', updatedById: actorId, version: { increment: 1 } },
+    });
+    return result.count;
+  },
+  async softDelete(id, actorId, client) {
+    const result = await client.landmark.updateMany({
+      where: { ...activeLandmark, id }, data: { deletedAt: new Date(), updatedById: actorId },
+    });
+    return result.count;
+  },
   transaction(fn) {
     return prisma.$transaction(fn);
   },
