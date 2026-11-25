@@ -1,6 +1,6 @@
 import { Prisma, type PopulationRecord, type VerificationStatus } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
-import { ConflictError } from '../../shared/errors.js';
+import { ConflictError, NotFoundError } from '../../shared/errors.js';
 import type { CreatePopulationInput, UpdatePopulationInput } from './population.schemas.js';
 export interface PopulationCreateContext { actorId: string; requestId: string }
 export type PopulationDetails = Pick<PopulationRecord, 'id' | 'villageId' | 'population' | 'referenceYear' | 'referenceDate' | 'sourceId' | 'isEstimate' | 'isPreferred' | 'needsReview' | 'notes' | 'verificationStatus' | 'version' | 'createdAt' | 'updatedAt'>;
@@ -8,8 +8,10 @@ export interface PopulationListParams {
  villageId: string; filters: { referenceYear?: number; sourceId?: string; isEstimate?: boolean; isPreferred?: boolean; needsReview?: boolean; verificationStatus?: VerificationStatus };
  sort: { field: 'referenceYear' | 'population' | 'createdAt' | 'updatedAt'; order: 'asc' | 'desc' }; skip: number; take: number;
 }
-export interface PopulationRepository { transaction<T>(fn: (client: Prisma.TransactionClient) => Promise<T>): Promise<T>; findLatestVerified(villageId: string, client: Prisma.TransactionClient, excludeId?: string): Promise<{population: number} | null>; create(villageId: string, input: CreatePopulationInput, needsReview: boolean, context: PopulationCreateContext, client: Prisma.TransactionClient): Promise<PopulationDetails>; findForUpdate(id: string, client: Prisma.TransactionClient): Promise<(PopulationDetails & {createdById: string | null}) | null>; update(id: string, input: UpdatePopulationInput, actorId: string, client: Prisma.TransactionClient, needsReview?: boolean): Promise<PopulationDetails>; findMany(params: PopulationListParams): Promise<{ items: PopulationDetails[]; total: number }>; findById(id: string): Promise<PopulationDetails | null> }
+type DeleteSnapshot = PopulationDetails & Pick<PopulationRecord, 'createdById' | 'updatedById' | 'verifiedById' | 'verifiedAt'>;
+export interface PopulationRepository { transaction<T>(fn: (client: Prisma.TransactionClient) => Promise<T>): Promise<T>; findLatestVerified(villageId: string, client: Prisma.TransactionClient, excludeId?: string): Promise<{population: number} | null>; create(villageId: string, input: CreatePopulationInput, needsReview: boolean, context: PopulationCreateContext, client: Prisma.TransactionClient): Promise<PopulationDetails>; findForUpdate(id: string, client: Prisma.TransactionClient): Promise<(PopulationDetails & {createdById: string | null}) | null>; findForDelete(id: string, client: Prisma.TransactionClient): Promise<DeleteSnapshot | null>; softDelete(id: string, actorId: string, client: Prisma.TransactionClient): Promise<DeleteSnapshot & {deletedAt: Date | null}>; update(id: string, input: UpdatePopulationInput, actorId: string, client: Prisma.TransactionClient, needsReview?: boolean): Promise<PopulationDetails>; findMany(params: PopulationListParams): Promise<{ items: PopulationDetails[]; total: number }>; findById(id: string): Promise<PopulationDetails | null> }
 const select = { id: true, villageId: true, population: true, referenceYear: true, referenceDate: true, sourceId: true, isEstimate: true, isPreferred: true, needsReview: true, notes: true, verificationStatus: true, version: true, createdAt: true, updatedAt: true } satisfies Prisma.PopulationRecordSelect;
+const deleteSelect = {...select, createdById: true, updatedById: true, verifiedById: true, verifiedAt: true} satisfies Prisma.PopulationRecordSelect;
 const active = { deletedAt: null, village: { deletedAt: null } } satisfies Prisma.PopulationRecordWhereInput;
 function isPopulationBusinessKeyConflict(error: unknown): boolean {
  if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002' || !error.meta) return false;
@@ -32,6 +34,19 @@ export const populationRepository: PopulationRepository = {
   const rows = await client.$queryRaw<{id: string}[]>`SELECT id FROM population_records WHERE id = ${id}::uuid AND deleted_at IS NULL FOR UPDATE`;
   if (!rows.length) return null;
   return client.populationRecord.findFirst({where: {id, deletedAt: null}, select: {...select, createdById: true}});
+ },
+ async findForDelete(id, client) {
+  const rows = await client.$queryRaw<{id: string}[]>`SELECT id FROM population_records WHERE id = ${id}::uuid AND deleted_at IS NULL FOR UPDATE`;
+  if (!rows.length) return null;
+  return client.populationRecord.findFirst({where: {id, deletedAt: null}, select: deleteSelect});
+ },
+ async softDelete(id, actorId, client) {
+  try {
+   return await client.populationRecord.update({where: {id, deletedAt: null}, data: {deletedAt: new Date(), isPreferred: false, updatedById: actorId}, select: {...deleteSelect, deletedAt: true}});
+  } catch (error) {
+   if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') throw new NotFoundError('Population record not found');
+   throw error;
+  }
  },
  async update(id, input, actorId, client, needsReview) {
   const {expectedVersion, referenceDate, population, referenceYear, sourceId, isEstimate, notes} = input;

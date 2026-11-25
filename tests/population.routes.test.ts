@@ -16,7 +16,7 @@ describe('population routes',()=>{
  it('rejects offsets above the maximum',async()=>{expect((await request(app).get(list).query({page:'2147483649',limit:'1'})).status).toBe(400);expect(service.list).not.toHaveBeenCalled();});
  it.each(['/api/v1/villages/bad/population-records','/api/v1/population-records/bad',list+'?needsReview=maybe'] )('rejects invalid input %s',async path=>{expect((await request(app).get(path)).status).toBe(400);expect(service.list).not.toHaveBeenCalled();expect(service.getById).not.toHaveBeenCalled();});
  it.each([list,detail])('returns 404 %s',async path=>{service.list.mockRejectedValue(new NotFoundError());service.getById.mockRejectedValue(new NotFoundError());expect((await request(app).get(path)).status).toBe(404);});
- it('does not expose DELETE',async()=>{for(const path of [list,detail]) expect((await request(app).delete(path).send({})).status).toBe(404);});
+ it('does not expose DELETE on the village list',async()=>{expect((await request(app).delete(list).send({})).status).toBe(404);});
  it('does not expose PATCH on the village list',async()=>{expect((await request(app).patch(list).send({})).status).toBe(404);});
  it('does not expose POST on detail',async()=>{expect((await request(app).post(detail).send({})).status).toBe(404);});
 });

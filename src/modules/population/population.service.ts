@@ -14,6 +14,21 @@ function anomalous(population: number, baseline: {population: number} | null): b
 }
 export class PopulationService {
  constructor(private readonly repository: PopulationRepository = populationRepository, private readonly villages: Pick<typeof villageService, 'ensureExists'> = villageService) {}
+ async softDelete(id: string, context: PopulationCreateContext & {role: Role}) {
+  if (context.role !== 'ADMIN') throw new ForbiddenError();
+  const initial = await this.repository.findById(id);
+  if (!initial) throw new NotFoundError('Population record not found');
+  return this.repository.transaction(async client => {
+   await this.villages.ensureExists(initial.villageId, client);
+   const current = await this.repository.findForDelete(id, client);
+   if (!current || current.villageId !== initial.villageId) throw new NotFoundError('Population record not found');
+   const deleted = await this.repository.softDelete(id, context.actorId, client);
+   await recordAudit({entityType:'PopulationRecord', entityId:id, action:'DELETE', actorId:context.actorId, requestId:context.requestId,
+    before:{...snapshot(current), createdById:current.createdById, updatedById:current.updatedById, verifiedById:current.verifiedById, verifiedAt:current.verifiedAt?.toISOString() ?? null, deletedAt:null},
+    after:{...snapshot(deleted), createdById:deleted.createdById, updatedById:deleted.updatedById, verifiedById:deleted.verifiedById, verifiedAt:deleted.verifiedAt?.toISOString() ?? null, deletedAt:deleted.deletedAt?.toISOString() ?? null}}, client);
+   return {id:deleted.id, version:deleted.version, deletedAt:deleted.deletedAt};
+  });
+ }
  async update(id: string, input: UpdatePopulationInput, context: PopulationCreateContext & {role: Role}) {
   const initial = await this.repository.findById(id);
   if (!initial) throw new NotFoundError('Population record not found');
