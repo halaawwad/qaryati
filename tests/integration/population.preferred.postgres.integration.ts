@@ -354,6 +354,33 @@ describe('Preferred selection row-lock races',()=>{
 });
 
 describe('Population preferred selection with PostgreSQL',()=>{
+ it.each(['target','previous'] as const)('leaves both rows and audits untouched when %s is exhausted',async which=>safeTest(async()=>{
+  const f=await prepare(),ctx=context(f.actorId),max=2147483647;
+  await db.populationRecord.update({where:{id:which==='target'?f.otherId:f.id},data:{version:max}});
+  const before=await db.populationRecord.findMany({where:{id:{in:[f.id,f.otherId]}},orderBy:{id:'asc'}});
+  await expect(population.selectPreferred(f.otherId,{expectedVersion:which==='target'?max:1,expectedPreferred:{id:f.id,version:which==='previous'?max:3}},ctx)).rejects.toMatchObject({code:'CONFLICT'});
+  expect(await db.populationRecord.findMany({where:{id:{in:[f.id,f.otherId]}},orderBy:{id:'asc'}})).toEqual(before);
+  expect(await db.auditLog.count({where:{requestId:ctx.requestId}})).toBe(0);
+ })());
+ it('guards PATCH and review at maximum, permits no-ops, last increment and unversioned delete',safeTest(async()=>{
+  const f=await prepare(),max=2147483647,ctx=context(f.actorId);
+  await db.populationRecord.update({where:{id:f.otherId},data:{version:max}});
+  const before=await db.populationRecord.findUniqueOrThrow({where:{id:f.otherId}});
+  await expect(population.update(f.otherId,{expectedVersion:max,notes:'changed'},ctx)).rejects.toMatchObject({code:'CONFLICT'});
+  expect((await population.update(f.otherId,{expectedVersion:max,population:before.population},ctx)).version).toBe(max);
+  await expect(population.review(f.otherId,{expectedVersion:max},'REJECTED',ctx)).rejects.toMatchObject({code:'CONFLICT'});
+  expect((await population.review(f.otherId,{expectedVersion:max},'VERIFIED',ctx)).version).toBe(max);
+  expect(await db.populationRecord.findUniqueOrThrow({where:{id:f.otherId}})).toEqual(before);
+  expect(await db.auditLog.count({where:{requestId:ctx.requestId}})).toBe(0);
+  await db.populationRecord.update({where:{id:f.otherId},data:{verificationStatus:'PENDING'}});
+  await expect(population.review(f.otherId,{expectedVersion:max},'VERIFIED',ctx)).rejects.toMatchObject({code:'CONFLICT'});
+  expect(await db.auditLog.count({where:{requestId:ctx.requestId}})).toBe(0);
+  await db.populationRecord.update({where:{id:f.otherId},data:{version:max-1,verificationStatus:'PENDING'}});
+  expect((await population.review(f.otherId,{expectedVersion:max-1},'VERIFIED',ctx)).version).toBe(max);
+  expect(await db.auditLog.count({where:{requestId:ctx.requestId}})).toBe(1);
+  expect((await population.softDelete(f.otherId,ctx)).version).toBe(max);
+  expect(await db.auditLog.count({where:{requestId:ctx.requestId}})).toBe(2);
+ }));
  it('replaces a legacy pending preferred record, preserving provenance and auditing both changes',safeTest(async()=>{
   const f=await prepare(), ctx=context(f.otherActor);
   const before=await db.populationRecord.findMany({where:{id:{in:[f.id,f.otherId]}},orderBy:{id:'asc'}});
