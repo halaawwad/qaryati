@@ -1,0 +1,111 @@
+openapi: 3.0.3
+info:
+  title: Qaryati API - Change Requests
+  version: '1.0.0'
+paths:
+  /api/v1/change-requests:
+    post:
+      summary: Submit a Population change request
+      description: >-
+        Only an authenticated EDITOR may submit. The active Population record must
+        be VERIFIED and baseVersion must match. The proposal must make an actual
+        change; replacement sources must be active. An unchanged source may be
+        retained even if deleted. An actual proposal against version 2147483647
+        conflicts. Reason is optional and multiple pending requests are allowed;
+        these are provisional submission policies. Submission does not modify the
+        Population record or reserve a preferred slot, and does not guarantee that
+        the proposal will remain applicable. Request creation and audit are atomic.
+        Proposed source UUIDs are stored in lowercase and compared case-insensitively.
+        Known separate issue: Population PATCH compares source UUID strings by case;
+        this endpoint does not change PATCH behavior.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Submission' }
+      responses:
+        '201':
+          description: Pending change request created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/ChangeRequest' }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '500': { $ref: '#/components/responses/Error' }
+components:
+  responses:
+    Error:
+      description: >-
+        Error envelope. Codes include VALIDATION_ERROR for invalid or unchanged
+        proposals, UNAUTHORIZED, FORBIDDEN, NOT_FOUND, and CONFLICT for a stale,
+        ineligible, concurrently changed, or version-exhausted target.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [error]
+            properties:
+              error:
+                type: object
+                required: [code, message, details]
+                properties:
+                  code: { type: string }
+                  message: { type: string }
+                  requestId: { type: string }
+                  details:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        field: { type: string }
+                        message: { type: string }
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+  schemas:
+    Proposal:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        population: { type: integer, minimum: 1, maximum: 2147483647 }
+        referenceYear: { type: integer, minimum: 1800, maximum: 2100 }
+        referenceDate: { type: string, format: date-time, nullable: true }
+        sourceId: { type: string, format: uuid }
+        isEstimate: { type: boolean }
+        notes: { type: string, nullable: true, maxLength: 5000 }
+    Submission:
+      type: object
+      additionalProperties: false
+      required: [entityType, entityId, baseVersion, proposedChanges]
+      properties:
+        entityType: { type: string, enum: [PopulationRecord] }
+        entityId: { type: string, format: uuid }
+        baseVersion: { type: integer, minimum: 1, maximum: 2147483647 }
+        proposedChanges: { $ref: '#/components/schemas/Proposal' }
+        reason: { type: string, maxLength: 5000, description: Trimmed before storage. }
+    ChangeRequest:
+      type: object
+      required: [id, entityType, entityId, baseVersion, proposedChanges, reason, status, requestedById, reviewedById, reviewComment, createdAt, updatedAt, reviewedAt]
+      properties:
+        id: { type: string, format: uuid }
+        entityType: { type: string, enum: [PopulationRecord] }
+        entityId: { type: string, format: uuid }
+        baseVersion: { type: integer }
+        proposedChanges: { $ref: '#/components/schemas/Proposal' }
+        reason: { type: string, nullable: true }
+        status: { type: string, enum: [PENDING] }
+        requestedById: { type: string, format: uuid }
+        reviewedById: { type: string, format: uuid, nullable: true }
+        reviewComment: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        reviewedAt: { type: string, format: date-time, nullable: true }

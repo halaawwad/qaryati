@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { authRouter } from './modules/auth/auth.routes.js';
+import { changeRequestsRouter } from './modules/change-requests/change-requests.routes.js';
 import { economyRouter, villageEconomyRouter } from './modules/economy/economy.routes.js';
 import { eventsRouter, villageEventsRouter } from './modules/events/events.routes.js';
 import { facilitiesRouter, villageFacilitiesRouter } from './modules/facilities/facilities.routes.js';
@@ -48,6 +49,7 @@ router.get('/health', async (_req, res) => {
 });
 
 router.use('/auth', authRouter);
+router.use('/change-requests', changeRequestsRouter);
 router.use('/sources', sourcesRouter);
 router.use('/users', usersRouter);
 router.use('/governorates', governoratesRouter);

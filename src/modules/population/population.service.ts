@@ -1,4 +1,4 @@
-import { ConflictError, ForbiddenError, NotFoundError } from '../../shared/errors.js';
+import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../../shared/errors.js';
 import { Prisma, type Role } from '@prisma/client';
 import { buildPaginationMeta, parsePagination } from '../../shared/pagination.js';
 import { villageService } from '../villages/villages.service.js';
@@ -15,8 +15,35 @@ function anomalous(population: number, baseline: {population: number} | null): b
 function ensureVersionCapacity(version: number): void {
  if (version >= 2147483647) throw new ConflictError('Population record version exhausted');
 }
+function hasChanges(before: import('./population.repository.js').PopulationDetails, changes: Omit<UpdatePopulationInput, 'expectedVersion'>): boolean {
+ return Object.entries(changes).some(([key, value]) => {
+  if (value === undefined) return false;
+  if (key === 'referenceDate') return (value === null ? null : new Date(value as string).getTime()) !== (before.referenceDate?.getTime() ?? null);
+  return value !== before[key as keyof typeof before];
+ });
+}
 export class PopulationService {
  constructor(private readonly repository: PopulationRepository = populationRepository, private readonly villages: Pick<typeof villageService, 'ensureExists'> = villageService) {}
+ async validateChangeProposal(id: string, input: UpdatePopulationInput, client: Prisma.TransactionClient): Promise<void> {
+  const initial = await this.repository.findById(id);
+  if (!initial) throw new NotFoundError('Population record not found');
+  await this.villages.ensureExists(initial.villageId, client);
+  let missingSource: NotFoundError | undefined;
+  if (input.sourceId !== undefined && input.sourceId.toLowerCase() !== initial.sourceId.toLowerCase()) {
+   try { await sourceService.getById(input.sourceId, client); }
+   catch (error) { if (error instanceof NotFoundError) missingSource = error; else throw error; }
+  }
+  const current = await this.repository.findForUpdate(id, client);
+  if (!current) throw new NotFoundError('Population record not found');
+  if (current.villageId !== initial.villageId || current.sourceId !== initial.sourceId) throw new ConflictError('Population record changed during submission');
+  if (current.verificationStatus !== 'VERIFIED') throw new ConflictError('Only verified population records can be proposed');
+  if (missingSource) throw missingSource;
+  if (current.version !== input.expectedVersion) throw new ConflictError('Population record version conflict');
+  const {expectedVersion: _version, ...changes} = input;
+  if (changes.sourceId?.toLowerCase() === current.sourceId.toLowerCase()) changes.sourceId = current.sourceId;
+  if (!hasChanges(current, changes)) throw new ValidationError('Proposal must change at least one field');
+  ensureVersionCapacity(current.version);
+ }
  async selectPreferred(id: string, input: SelectPreferredInput, context: PopulationCreateContext & {role: Role}) {
   if (context.role !== 'REVIEWER' && context.role !== 'ADMIN') throw new ForbiddenError();
   const initial = await this.repository.findById(id);
@@ -117,11 +144,7 @@ export class PopulationService {
    if (current.version !== input.expectedVersion) throw new ConflictError('Population record version conflict');
    const {createdById: _creator, ...before} = current;
    const {expectedVersion: _version, ...changes} = input;
-   const changed = Object.entries(changes).some(([key, value]) => {
-    if (value === undefined) return false;
-    if (key === 'referenceDate') return (value === null ? null : new Date(value as string).getTime()) !== (before.referenceDate?.getTime() ?? null);
-    return value !== before[key as keyof typeof before];
-   });
+   const changed = hasChanges(before, changes);
    if (!changed) return before;
    ensureVersionCapacity(current.version);
    let needsReview: boolean | undefined;
