@@ -4,6 +4,37 @@ info:
   version: '1.0.0'
 paths:
   /api/v1/change-requests:
+    get:
+      summary: List change requests
+      description: >-
+        Authentication required. Editors see only their own requests and cannot
+        supply requestedById; reviewers and administrators see all requests and
+        may filter by requester. Filters combine with AND. Ordered by createdAt
+        descending then id ascending; count and results use a consistent snapshot.
+        Historical requests remain visible when their targets change or are deleted.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: limit, in: query, description: Capped at 100., schema: { type: integer, minimum: 1, default: 20 } }
+        - { name: status, in: query, schema: { type: string, enum: [PENDING, APPROVED, REJECTED] } }
+        - { name: entityType, in: query, schema: { type: string, enum: [PopulationRecord] } }
+        - { name: entityId, in: query, schema: { type: string, format: uuid } }
+        - { name: requestedById, in: query, description: Reviewer or administrator only., schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Page of requests and filtered pagination metadata.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/ChangeRequest' } }
+                  meta: { $ref: '#/components/schemas/PaginationMeta' }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '500': { $ref: '#/components/responses/Error' }
     post:
       summary: Submit a Population change request
       description: >-
@@ -41,6 +72,31 @@ paths:
         '404': { $ref: '#/components/responses/Error' }
         '409': { $ref: '#/components/responses/Error' }
         '500': { $ref: '#/components/responses/Error' }
+  /api/v1/change-requests/{id}:
+    get:
+      summary: Get a change request
+      description: >-
+        Authentication required. Editors can read only their own requests; other
+        requests and missing IDs both return 404. Reviewers and administrators
+        may read all requests, including those whose targets are no longer active.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Change request.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/ChangeRequest' }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '500': { $ref: '#/components/responses/Error' }
 components:
   responses:
     Error:
@@ -71,6 +127,16 @@ components:
   securitySchemes:
     bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
   schemas:
+    PaginationMeta:
+      type: object
+      required: [page, limit, total, totalPages, hasNextPage, hasPrevPage]
+      properties:
+        page: { type: integer }
+        limit: { type: integer }
+        total: { type: integer }
+        totalPages: { type: integer }
+        hasNextPage: { type: boolean }
+        hasPrevPage: { type: boolean }
     Proposal:
       type: object
       additionalProperties: false
@@ -102,7 +168,7 @@ components:
         baseVersion: { type: integer }
         proposedChanges: { $ref: '#/components/schemas/Proposal' }
         reason: { type: string, nullable: true }
-        status: { type: string, enum: [PENDING] }
+        status: { type: string, enum: [PENDING, APPROVED, REJECTED] }
         requestedById: { type: string, format: uuid }
         reviewedById: { type: string, format: uuid, nullable: true }
         reviewComment: { type: string, nullable: true }

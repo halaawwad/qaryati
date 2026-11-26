@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import { updatePopulationSchema } from '../population/population.schemas.js';
+import { ChangeRequestStatus } from '@prisma/client';
+import { parsePagination } from '../../shared/pagination.js';
 
 const populationProposalSchema = z.strictObject({
  population: updatePopulationSchema.shape.population,
@@ -17,3 +19,11 @@ export const submitChangeRequestSchema = z.strictObject({
  reason: z.string().trim().max(5000).optional(),
 });
 export type SubmitChangeRequestInput = z.infer<typeof submitChangeRequestSchema>;
+const positiveQueryInteger = z.string().regex(/^\d+$/).transform(Number).pipe(z.number().int().positive().safe());
+export const listChangeRequestsSchema = z.object({
+ page: positiveQueryInteger.optional(), limit: positiveQueryInteger.optional(),
+ status: z.enum(ChangeRequestStatus).optional(), entityType: z.literal('PopulationRecord').optional(),
+ entityId: z.uuid().optional(), requestedById: z.uuid().optional(),
+}).refine(query => { const {skip}=parsePagination(query); return Number.isSafeInteger(skip) && skip<=2147483647; }, {path:['page'],message:'Pagination offset must not exceed 2147483647'});
+export const changeRequestParamsSchema = z.object({id:z.uuid()});
+export type ListChangeRequestsQuery = z.infer<typeof listChangeRequestsSchema>;
