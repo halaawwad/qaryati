@@ -18,6 +18,8 @@ paths:
         are atomic. Reference date need not match the reference year. needsReview is
         calculated by comparing population with the non-deleted VERIFIED record for
         the village with the highest reference year (ties use ascending record ID).
+        The baseline is the one visible to the lookup statement in the transaction;
+        concurrent changes may alter the latest baseline before commit.
         A difference greater than 50% is flagged; no baseline means false. An invalid
         non-positive baseline is flagged for review.
       security:
@@ -178,7 +180,8 @@ paths:
         REJECTED records are provisionally prohibited. An unchanged deleted source may be retained; a replacement source
         must be active. Record authorization is checked before a missing or deleted
         replacement source is reported. Matching no-ops do not increment version or create an audit.
-        Other changes and their audit are atomic. Conflicts include stale versions,
+        A matching no-op succeeds at version 2147483647; an actual change at that
+        version returns 409 CONFLICT. Other changes and their audit are atomic. Conflicts include stale versions,
         concurrent changes, and positively identified uniqueness conflicts. Provisionally,
         changing population compares it with the latest other non-deleted VERIFIED record
         for the village using the CREATE threshold; a flag once set remains set. With no
@@ -253,8 +256,8 @@ paths:
         Conflicts include stale target or slot versions, an ineligible target,
         concurrent slot changes, a deleted preferred index occupant, and recognized
         preferred-index or database concurrency conflicts. No selection is retried.
-        Version increments at the PostgreSQL integer maximum can overflow; the
-        exhaustion policy remains unresolved. The global JSON parser can return
+        An actual change returns 409 CONFLICT if either row to be changed is at
+        version 2147483647; a matching no-op succeeds at that version. The global JSON parser can return
         400 or 413 before route-level authentication. READ defaults are unchanged.
       security:
         - bearerAuth: []
@@ -303,8 +306,8 @@ paths:
         explicit team-guide rules. An active village is required; a deleted source
         is permitted. Authentication and role checks precede route validation;
         the global JSON parser may return 400 or 413 before authentication.
-        Version is stored as a PostgreSQL integer; incrementing a stored maximum
-        value (2147483647) exceeds its range. The exhaustion policy is unresolved.
+        A transition at version 2147483647 returns 409 CONFLICT; a matching
+        same-status no-op succeeds at that version.
       security:
         - bearerAuth: []
       parameters:

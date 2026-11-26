@@ -33,6 +33,14 @@ function review(action:'verify'|'reject', body:object={expectedVersion:2}, role?
  return req.send(body);
 }
 describe('population review',()=>{
+ it.each(['verify','reject'] as const)('%s guards maximum version after stale and no-op checks',async action=>{
+  row.version=2147483647;
+  const stale=await review(action,{expectedVersion:2147483646},'ADMIN'); expect(stale.status).toBe(409); expect(stale.body.error.message).toBe('Population record version conflict');
+  const exhausted=await review(action,{expectedVersion:2147483647},'ADMIN'); expect(exhausted.status).toBe(409); expect(exhausted.body.error.code).toBe('CONFLICT');
+  row.verificationStatus=action==='verify'?'VERIFIED':'REJECTED';
+  expect((await review(action,{expectedVersion:2147483647},'ADMIN')).status).toBe(200);
+  expect(db.update).not.toHaveBeenCalled(); expect(db.audit).not.toHaveBeenCalled();
+ });
  it.each(['verify','reject'] as const)('%s authenticates and authorizes before validation and lookup',async action=>{
   expect((await review(action,{},undefined,'bad')).status).toBe(401);
   expect((await review(action,{},'EDITOR','bad')).status).toBe(403);

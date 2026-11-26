@@ -22,19 +22,24 @@ beforeEach(() => {
 });
 function del(role?: string, path = id) {let req=request(app).delete(`/api/v1/population-records/${path}`).set('x-request-id','delete-request'); if(role) req=req.set('Authorization',`Bearer ${jwt.sign({role},secret,{subject:actor,algorithm:'HS256'})}`); return req;}
 describe('population DELETE', () => {
+ it('deletes a maximum-version record without incrementing its version',async()=>{
+  row.version=2147483647; const response=await del('ADMIN');
+  expect(response.status).toBe(200); expect(response.body.data.version).toBe(2147483647);
+  expect(db.update.mock.calls[0]![0].data).not.toHaveProperty('version'); expect(db.audit).toHaveBeenCalledOnce();
+ });
  it.each([[undefined,401],['EDITOR',403],['REVIEWER',403]] as const)('rejects %s before validation or lookup',async(role,status)=>{expect((await del(role,'bad')).status).toBe(status); expect(db.find).not.toHaveBeenCalled(); expect(db.audit).not.toHaveBeenCalled();});
  it('validates the UUID after authorization',async()=>{expect((await del('ADMIN','bad')).status).toBe(400); expect(db.find).not.toHaveBeenCalled();});
  it.each(['PENDING','VERIFIED','REJECTED'] as const)('deletes %s irrespective of ownership and preserves metadata and version',async status=>{
   row.verificationStatus=status; const response=await del('ADMIN'); expect(response.status).toBe(200);
   expect(response.body.data).toEqual({id,version:3,deletedAt:expect.any(String)});
-  const write=db.update.mock.calls[0][0]; expect(write.where).toEqual({id,deletedAt:null});
+  const write=db.update.mock.calls[0]![0]; expect(write.where).toEqual({id,deletedAt:null});
   expect(write.data).toEqual({deletedAt:expect.any(Date),isPreferred:false,updatedById:actor});
   expect(db.update).toHaveBeenCalledOnce(); expect(db.audit).toHaveBeenCalledOnce();
-  expect(db.audit.mock.calls[0][0].data).toMatchObject({entityType:'PopulationRecord',entityId:id,action:'DELETE',actorId:actor,requestId:'delete-request',before:{isPreferred:true,needsReview:true,version:3,verificationStatus:status,verifiedById:actor,verifiedAt:'2026-01-01T00:00:00.000Z',deletedAt:null,sourceId,notes:'provenance'},after:{isPreferred:false,needsReview:true,version:3,verificationStatus:status,verifiedById:actor,deletedAt:expect.any(String)}});
+  expect(db.audit.mock.calls[0]![0].data).toMatchObject({entityType:'PopulationRecord',entityId:id,action:'DELETE',actorId:actor,requestId:'delete-request',before:{isPreferred:true,needsReview:true,version:3,verificationStatus:status,verifiedById:actor,verifiedAt:'2026-01-01T00:00:00.000Z',deletedAt:null,sourceId,notes:'provenance'},after:{isPreferred:false,needsReview:true,version:3,verificationStatus:status,verifiedById:actor,deletedAt:expect.any(String)}});
   expect(db.lock.mock.calls.map(call=>(call[0] as TemplateStringsArray).join(''))).toEqual([expect.stringContaining('FROM villages'),expect.stringContaining('FROM population_records')]);
   expect(db.update.mock.invocationCallOrder[0]).toBeLessThan(db.audit.mock.invocationCallOrder[0]!);
  });
- it('deletes non-preferred records and ignores unexpected bodies',async()=>{row.isPreferred=false; expect((await del('ADMIN').send({expectedVersion:999})).status).toBe(200); expect(db.update.mock.calls[0][0].data.isPreferred).toBe(false);});
+ it('deletes non-preferred records and ignores unexpected bodies',async()=>{row.isPreferred=false; expect((await del('ADMIN').send({expectedVersion:999})).status).toBe(200); expect(db.update.mock.calls[0]![0].data.isPreferred).toBe(false);});
  it('preserves provenance and audits the locked snapshots when the source is deleted',async()=>{
   const source = {id:sourceId, deletedAt:new Date('2026-02-01T00:00:00Z')};
   db.source.mockResolvedValue(source);
@@ -55,11 +60,11 @@ describe('population DELETE', () => {
    expect.stringContaining('FROM villages'), expect.stringContaining('FROM population_records'),
   ]);
   expect(db.update).toHaveBeenCalledOnce();
-  expect(db.update.mock.calls[0][0]).toMatchObject({where:{id,deletedAt:null},data:{deletedAt,isPreferred:false,updatedById:actor}});
+  expect(db.update.mock.calls[0]![0]).toMatchObject({where:{id,deletedAt:null},data:{deletedAt,isPreferred:false,updatedById:actor}});
   const snapshot = {id,villageId,sourceId,population:original.population,referenceYear:original.referenceYear,referenceDate:null,
    isEstimate:original.isEstimate,needsReview:original.needsReview,notes:original.notes,verificationStatus:original.verificationStatus,
    version:original.version,createdById:original.createdById,verifiedById:original.verifiedById,verifiedAt:original.verifiedAt?.toISOString()};
-  expect(db.audit.mock.calls[0][0].data).toEqual({entityType:'PopulationRecord',entityId:id,action:'DELETE',actorId:actor,requestId:'delete-request',
+  expect(db.audit.mock.calls[0]![0].data).toEqual({entityType:'PopulationRecord',entityId:id,action:'DELETE',actorId:actor,requestId:'delete-request',
    before:{...snapshot,updatedById:original.updatedById,isPreferred:true,deletedAt:null},
    after:{...snapshot,updatedById:actor,isPreferred:false,deletedAt:deletedAt.toISOString()}});
  });

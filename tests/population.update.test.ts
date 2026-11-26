@@ -24,6 +24,19 @@ beforeEach(()=>{
 });
 function patch(body: object, role='EDITOR', subject=actor) {const token=jwt.sign({role},secret,{subject,algorithm:'HS256'});return request(app).patch(`/api/v1/population-records/${id}`).set('Authorization',`Bearer ${token}`).send(body);}
 describe('population PATCH',()=>{
+ it('guards exhaustion after stale and no-op checks',async()=>{
+  row.version=2147483647;
+  const stale=await patch({expectedVersion:2147483646,population:200}); expect(stale.status).toBe(409); expect(stale.body.error.message).toBe('Population record version conflict');
+  expect((await patch({expectedVersion:2147483647,population:100})).status).toBe(200);
+  const exhausted=await patch({expectedVersion:2147483647,population:200}); expect(exhausted.status).toBe(409); expect(exhausted.body.error.code).toBe('CONFLICT');
+  expect(db.update).not.toHaveBeenCalled(); expect(db.audit).not.toHaveBeenCalled(); expect(db.baseline).not.toHaveBeenCalled();
+ });
+ it('allows an actual change from the penultimate version',async()=>{
+  row.version=2147483646;
+  db.update.mockImplementationOnce(async()=>({...row,notes:'changed',version:2147483647}));
+  const response=await patch({expectedVersion:2147483646,notes:'changed'});
+  expect(response.status).toBe(200); expect(response.body.data.version).toBe(2147483647); expect(db.audit).toHaveBeenCalledOnce();
+ });
  it.each([['EDITOR','PENDING',200],['EDITOR','VERIFIED',403],['EDITOR','REJECTED',403],['REVIEWER','PENDING',200],['REVIEWER','VERIFIED',200],['REVIEWER','REJECTED',403],['ADMIN','PENDING',200],['ADMIN','VERIFIED',200],['ADMIN','REJECTED',403]])('%s with %s returns %i',async(role,status,expected)=>{row.verificationStatus=status;const res=await patch({expectedVersion:2,population:200},role);expect(res.status).toBe(expected);if(expected===200){expect(res.body.data.verificationStatus).toBe(status);expect(db.audit).toHaveBeenCalledOnce();expect(db.update.mock.calls[0]![0].data).not.toHaveProperty('verificationStatus');expect(res.body.data).not.toHaveProperty('createdById');}});
  it('denies an editor editing another creator',async()=>{row.createdById=null;expect((await patch({expectedVersion:2,population:200})).status).toBe(403);expect(db.update).not.toHaveBeenCalled();});
  it.each([{}, {expectedVersion:2}, {expectedVersion:0,population:1}, {expectedVersion:2,isPreferred:true}, {expectedVersion:2,needsReview:false}, {expectedVersion:2,needsReview:true}, {expectedVersion:2,verificationStatus:'VERIFIED'}, {expectedVersion:2,population:0}, {expectedVersion:2,referenceYear:2101}, {expectedVersion:2,notes:'x'.repeat(5001)}])('rejects invalid input %j',async body=>{expect((await patch(body)).status).toBe(400);expect(db.transaction).not.toHaveBeenCalled();});
