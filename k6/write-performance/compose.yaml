@@ -1,0 +1,53 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${PERF_DB:?required}
+      POSTGRES_USER: ${PERF_USER:?required}
+      POSTGRES_PASSWORD: ${PERF_PASSWORD:?required}
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 2s
+      timeout: 2s
+      retries: 30
+  redis:
+    image: redis:7-alpine
+    command: [redis-server, --save, '', --appendonly, 'no']
+    tmpfs:
+      - /data
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+  app:
+    build:
+      context: ../..
+    environment:
+      NODE_ENV: test
+      NODE_PATH: /app/node_modules
+      PORT: '3000'
+      LOG_LEVEL: silent
+      JWT_ACCESS_SECRET: ${PERF_JWT:?required}
+      DATABASE_URL: postgresql://${PERF_USER:?required}:${PERF_PASSWORD:?required}@postgres:5432/${PERF_DB:?required}?schema=public
+      REDIS_URL: redis://redis:6379
+      RATE_LIMIT_ENABLED: 'false'
+      PERF_RUN_ID: ${PERF_RUN_ID:?required}
+      PERF_DB: ${PERF_DB:?required}
+      PERF_USER: ${PERF_USER:?required}
+      PERF_EMAIL: ${PERF_EMAIL:?required}
+      PERF_LOGIN_PASSWORD: ${PERF_LOGIN_PASSWORD:?required}
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    volumes:
+      - ./fixture.cjs:/perf/fixture.cjs:ro
+      - ./reconcile.cjs:/perf/reconcile.cjs:ro
+      - ${PERF_OUTPUT_DIR:?required}:/perf-output
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3000/api/v1/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
