@@ -1,0 +1,227 @@
+openapi: '3.0.3'
+info:
+  title: Qaryati API - Sources
+  version: '1.0.0'
+  description: Implemented Source read, create, update and soft-delete endpoints. Paths include the API prefix. Responses carry X-Request-Id and may be rate limited.
+servers:
+  - url: /
+paths:
+  /api/v1/sources:
+    get:
+      summary: List active sources
+      operationId: listSources
+      security: []
+      description: Public. Includes all verification statuses. Ordered by title ascending then ID ascending. Unknown query parameters are ignored.
+      parameters:
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: limit, in: query, description: Capped at 100., schema: { type: integer, minimum: 1, default: 20 } }
+        - { name: sourceType, in: query, schema: { $ref: '#/components/schemas/SourceType' } }
+        - { name: verificationStatus, in: query, schema: { $ref: '#/components/schemas/VerificationStatus' } }
+      responses:
+        '200':
+          description: Page of sources with filtered pagination metadata.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/Source' } }
+                  meta: { $ref: '#/components/schemas/PaginationMeta' }
+        '400': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+        '500': { $ref: '#/components/responses/Error' }
+    post:
+      summary: Create a source
+      operationId: createSource
+      description: EDITOR, REVIEWER or ADMIN. Creates a PENDING source at version 1 and writes its audit atomically. URL must be HTTP or HTTPS without username or password. Audit URL snapshots omit query and fragment; the source retains the submitted URL.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateSource' }
+            example: { title: Census report, sourceType: CENSUS, year: 2020, url: 'https://example.org/report' }
+      responses:
+        '201': { $ref: '#/components/responses/Source' }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+        '500': { $ref: '#/components/responses/Error' }
+  /api/v1/sources/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      summary: Get an active source
+      operationId: getSource
+      security: []
+      description: Public. A deleted or missing source returns 404.
+      responses:
+        '200': { $ref: '#/components/responses/Source' }
+        '400': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+        '500': { $ref: '#/components/responses/Error' }
+    patch:
+      summary: Update a source
+      operationId: updateSource
+      description: >-
+        EDITOR can edit their own PENDING source. REVIEWER and ADMIN can edit
+        PENDING or VERIFIED sources; direct editing of REJECTED is provisionally
+        prohibited. The supplied expectedVersion must match. A matching no-op
+        preserves version and creates no audit, including at the maximum version.
+        Actual changes at version 2147483647 return 409. Other changes increment
+        version and are audited atomically; verification status is preserved.
+        Omitted fields remain unchanged; nullable fields can be cleared.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateSource' }
+            example: { expectedVersion: 1, title: Updated census report }
+      responses:
+        '200': { $ref: '#/components/responses/Source' }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+        '500': { $ref: '#/components/responses/Error' }
+    delete:
+      summary: Soft-delete a source
+      operationId: deleteSource
+      description: >-
+        ADMIN only. A matching expectedVersion is required; deletion increments
+        it and writes an audit atomically. A maximum version returns 409. Deleted
+        sources are hidden from Source reads; historical references remain intact.
+        Repeated deletion returns 404. Audit URLs omit queries and fragments.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DeleteSource' }
+            example: { expectedVersion: 1 }
+      responses:
+        '200':
+          description: Deletion receipt.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: object
+                    required: [id, version, deletedAt]
+                    properties:
+                      id: { type: string, format: uuid }
+                      version: { type: integer }
+                      deletedAt: { type: string, format: date-time }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+        '500': { $ref: '#/components/responses/Error' }
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+  responses:
+    Source:
+      description: Source representation.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [data]
+            properties:
+              data: { $ref: '#/components/schemas/Source' }
+    Error:
+      description: Standard error envelope; codes include VALIDATION_ERROR, UNAUTHORIZED, FORBIDDEN, NOT_FOUND and CONFLICT.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [error]
+            properties:
+              error:
+                type: object
+                required: [code, message, details, requestId]
+                properties:
+                  code: { type: string }
+                  message: { type: string }
+                  requestId: { type: string }
+                  details:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        field: { type: string }
+                        message: { type: string }
+  schemas:
+    SourceType: { type: string, enum: [CENSUS, BOOK, ARTICLE, GOVERNMENT, WEBSITE, ORAL, OTHER] }
+    VerificationStatus: { type: string, enum: [PENDING, VERIFIED, REJECTED] }
+    Version: { type: integer, minimum: 1, maximum: 2147483647 }
+    CreateSource:
+      type: object
+      additionalProperties: false
+      required: [title, sourceType]
+      properties:
+        title: { type: string, minLength: 1, description: Trimmed and nonblank. }
+        sourceType: { $ref: '#/components/schemas/SourceType' }
+        author: { type: string }
+        publisher: { type: string }
+        year: { type: integer, minimum: 1, description: At most the current UTC year plus one. }
+        url: { type: string, format: uri, description: HTTP or HTTPS only; no username or password. }
+        citationText: { type: string }
+    UpdateSource:
+      type: object
+      additionalProperties: false
+      required: [expectedVersion]
+      minProperties: 2
+      properties:
+        expectedVersion: { $ref: '#/components/schemas/Version' }
+        title: { type: string, minLength: 1 }
+        sourceType: { $ref: '#/components/schemas/SourceType' }
+        author: { type: string, nullable: true }
+        publisher: { type: string, nullable: true }
+        year: { type: integer, minimum: 1, nullable: true, description: At most the current UTC year plus one. }
+        url: { type: string, format: uri, nullable: true, description: HTTP or HTTPS only; no username or password. }
+        citationText: { type: string, nullable: true }
+    DeleteSource:
+      type: object
+      additionalProperties: false
+      required: [expectedVersion]
+      properties:
+        expectedVersion: { $ref: '#/components/schemas/Version' }
+    Source:
+      type: object
+      required: [id, title, sourceType, author, publisher, year, url, citationText, verificationStatus, version, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        sourceType: { $ref: '#/components/schemas/SourceType' }
+        author: { type: string, nullable: true }
+        publisher: { type: string, nullable: true }
+        year: { type: integer, nullable: true }
+        url: { type: string, nullable: true }
+        citationText: { type: string, nullable: true }
+        verificationStatus: { $ref: '#/components/schemas/VerificationStatus' }
+        version: { $ref: '#/components/schemas/Version' }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    PaginationMeta:
+      type: object
+      required: [page, limit, total, totalPages, hasNextPage, hasPrevPage]
+      properties:
+        page: { type: integer }
+        limit: { type: integer }
+        total: { type: integer }
+        totalPages: { type: integer }
+        hasNextPage: { type: boolean }
+        hasPrevPage: { type: boolean }
