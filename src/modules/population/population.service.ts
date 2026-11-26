@@ -5,7 +5,7 @@ import { villageService } from '../villages/villages.service.js';
 import { sourceService } from '../sources/sources.service.js';
 import { recordAudit } from '../audit/audit.service.js';
 import { populationRepository, type PopulationRepository, type PopulationCreateContext } from './population.repository.js';
-import type { CreatePopulationInput, ListPopulationQuery, UpdatePopulationInput } from './population.schemas.js';
+import type { CreatePopulationInput, ListPopulationQuery, UpdatePopulationInput, ReviewPopulationInput } from './population.schemas.js';
 function snapshot(item: import('./population.repository.js').PopulationDetails) {
  return {id:item.id, villageId:item.villageId, population:item.population, referenceYear:item.referenceYear, referenceDate:item.referenceDate?.toISOString() ?? null, sourceId:item.sourceId, isEstimate:item.isEstimate, isPreferred:item.isPreferred, needsReview:item.needsReview, notes:item.notes, verificationStatus:item.verificationStatus, version:item.version};
 }
@@ -14,6 +14,26 @@ function anomalous(population: number, baseline: {population: number} | null): b
 }
 export class PopulationService {
  constructor(private readonly repository: PopulationRepository = populationRepository, private readonly villages: Pick<typeof villageService, 'ensureExists'> = villageService) {}
+ async review(id: string, input: ReviewPopulationInput, target: 'VERIFIED' | 'REJECTED', context: PopulationCreateContext & {role: Role}) {
+  if (context.role !== 'REVIEWER' && context.role !== 'ADMIN') throw new ForbiddenError();
+  const initial = await this.repository.findById(id);
+  if (!initial) throw new NotFoundError('Population record not found');
+  return this.repository.transaction(async client => {
+   await this.villages.ensureExists(initial.villageId, client);
+   const current = await this.repository.findForDelete(id, client);
+   if (!current || current.villageId !== initial.villageId) throw new NotFoundError('Population record not found');
+   if (current.version !== input.expectedVersion) throw new ConflictError('Population record version conflict');
+   const publicRecord = (item: typeof current) => {
+    const {createdById: _createdById, updatedById: _updatedById, verifiedById: _verifiedById, verifiedAt: _verifiedAt, ...details} = item;
+    return details;
+   };
+   if (current.verificationStatus === target) return publicRecord(current);
+   const item = await this.repository.review(id, input.expectedVersion, current.verificationStatus, target, context.actorId, client);
+   const auditSnapshot = (record: typeof current) => ({...snapshot(record), createdById:record.createdById, updatedById:record.updatedById, verifiedById:record.verifiedById, verifiedAt:record.verifiedAt?.toISOString() ?? null});
+   await recordAudit({entityType:'PopulationRecord', entityId:id, action:target === 'VERIFIED' ? 'VERIFY' : 'REJECT', actorId:context.actorId, requestId:context.requestId, before:auditSnapshot(current), after:auditSnapshot(item)}, client);
+   return publicRecord(item);
+  });
+ }
  async softDelete(id: string, context: PopulationCreateContext & {role: Role}) {
   if (context.role !== 'ADMIN') throw new ForbiddenError();
   const initial = await this.repository.findById(id);

@@ -22,6 +22,8 @@ export const updatePopulationSchema = z.strictObject({
  notes: createPopulationSchema.shape.notes,
 }).refine(({expectedVersion: _version, ...changes}) => Object.values(changes).some(value => value !== undefined), {message: 'At least one editable field is required'});
 export type UpdatePopulationInput = z.infer<typeof updatePopulationSchema>;
+export const reviewPopulationSchema = z.strictObject({expectedVersion: z.number().int().positive().max(2147483647)});
+export type ReviewPopulationInput = z.infer<typeof reviewPopulationSchema>;
 const bool = z.enum(['true', 'false']).transform(value => value === 'true');
 const year = z.union([z.string().trim().min(1), z.number()]).transform(Number).pipe(z.number().int().min(-2147483648).max(2147483647));
 export const listPopulationQuerySchema = z.object({
