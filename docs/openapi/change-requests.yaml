@@ -72,6 +72,45 @@ paths:
         '404': { $ref: '#/components/responses/Error' }
         '409': { $ref: '#/components/responses/Error' }
         '500': { $ref: '#/components/responses/Error' }
+  /api/v1/change-requests/{id}/reject:
+    post:
+      summary: Reject a pending change request
+      description: >-
+        REVIEWER or ADMIN only. Only a PENDING request can be rejected; repeated
+        rejection and rejection of an approved request return 409. The reviewer
+        and time are recorded by the server. Self-review is not restricted by
+        this endpoint. Stale proposals and requests with inactive or deleted
+        targets remain rejectable. Rejection and its audit are atomic and do not
+        modify Population or Sources.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reviewComment]
+              properties:
+                reviewComment: { type: string, minLength: 1, maxLength: 5000, description: Trimmed and must not be blank. }
+      responses:
+        '200':
+          description: Rejected change request.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/ChangeRequest' }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '500': { $ref: '#/components/responses/Error' }
   /api/v1/change-requests/{id}:
     get:
       summary: Get a change request

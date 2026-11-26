@@ -1,12 +1,29 @@
-import type { Role } from '@prisma/client';
-import { ForbiddenError, NotFoundError } from '../../shared/errors.js';
+import type { ChangeRequest, Role } from '@prisma/client';
+import { ConflictError, ForbiddenError, NotFoundError } from '../../shared/errors.js';
 import { buildPaginationMeta, parsePagination } from '../../shared/pagination.js';
 import { recordAudit } from '../audit/audit.service.js';
 import { populationService } from '../population/population.service.js';
 import { changeRequestsRepository } from './change-requests.repository.js';
-import type { ListChangeRequestsQuery, SubmitChangeRequestInput } from './change-requests.schemas.js';
+import type { ListChangeRequestsQuery, RejectChangeRequestInput, SubmitChangeRequestInput } from './change-requests.schemas.js';
+
+function snapshot(item: ChangeRequest) {
+ return {id:item.id,entityType:item.entityType,entityId:item.entityId,baseVersion:item.baseVersion,proposedChanges:item.proposedChanges,
+  reason:item.reason,status:item.status,requestedById:item.requestedById,reviewedById:item.reviewedById,reviewComment:item.reviewComment,
+  createdAt:item.createdAt.toISOString(),updatedAt:item.updatedAt.toISOString(),reviewedAt:item.reviewedAt?.toISOString() ?? null};
+}
 
 export const changeRequestsService = {
+ async reject(id:string, input:RejectChangeRequestInput, context:{actorId:string;role:Role;requestId:string}) {
+  if (context.role !== 'REVIEWER' && context.role !== 'ADMIN') throw new ForbiddenError();
+  return changeRequestsRepository.transaction(async client=>{
+   const before=await changeRequestsRepository.lockById(id,client);
+   if (!before) throw new NotFoundError('Change request not found');
+   if (before.status !== 'PENDING') throw new ConflictError('Change request is not pending');
+   const after=await changeRequestsRepository.reject(id,context.actorId,input.reviewComment,client);
+   await recordAudit({entityType:'ChangeRequest',entityId:id,action:'REJECT',actorId:context.actorId,requestId:context.requestId,before:snapshot(before),after:snapshot(after)},client);
+   return after;
+  });
+ },
  async list(query: ListChangeRequestsQuery, context: {actorId:string;role:Role}) {
   if (!['EDITOR','REVIEWER','ADMIN'].includes(context.role)) throw new ForbiddenError();
   if (context.role === 'EDITOR' && query.requestedById !== undefined) throw new ForbiddenError();

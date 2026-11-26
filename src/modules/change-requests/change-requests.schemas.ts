@@ -26,4 +26,6 @@ export const listChangeRequestsSchema = z.object({
  entityId: z.uuid().optional(), requestedById: z.uuid().optional(),
 }).refine(query => { const {skip}=parsePagination(query); return Number.isSafeInteger(skip) && skip<=2147483647; }, {path:['page'],message:'Pagination offset must not exceed 2147483647'});
 export const changeRequestParamsSchema = z.object({id:z.uuid()});
+export const rejectChangeRequestSchema = z.strictObject({reviewComment:z.string().trim().min(1).max(5000)});
+export type RejectChangeRequestInput = z.infer<typeof rejectChangeRequestSchema>;
 export type ListChangeRequestsQuery = z.infer<typeof listChangeRequestsSchema>;
