@@ -47,7 +47,7 @@ export const createSourceSchema = z.strictObject({
 export type CreateSourceInput = z.infer<typeof createSourceSchema>;
 
 export const updateSourceSchema = z.strictObject({
-  expectedVersion: z.number().int().positive(),
+  expectedVersion: z.number().int().positive().max(2147483647),
   title: createSourceSchema.shape.title.optional(),
   sourceType: createSourceSchema.shape.sourceType.optional(),
   author: createSourceSchema.shape.author.nullable(),

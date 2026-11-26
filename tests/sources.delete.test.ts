@@ -67,7 +67,7 @@ beforeEach(() => {
   });
   mocks.audit.mockResolvedValue({ id: 'synthetic-audit-id' });
 });
-function remove(body: unknown = { expectedVersion: 3 }, role = 'ADMIN', sourceId = id) {
+function remove(body: object = { expectedVersion: 3 }, role = 'ADMIN', sourceId = id) {
   const token = jwt.sign({ role }, secret, { subject: actorId, algorithm: 'HS256', expiresIn: '15m' });
   return request(app).delete(`/api/v1/sources/${sourceId}`).set('Authorization', `Bearer ${token}`).send(body);
 }
@@ -81,6 +81,16 @@ function expectNoWrites() {
 }
 
 describe('DELETE Sources', () => {
+  it('rejects exhausted DELETE after stale-version validation', async () => {
+    current.version=2147483647;
+    expect((await remove({expectedVersion:2147483648})).status).toBe(400);
+    const stale=await remove({expectedVersion:2147483646}); expect(stale.status).toBe(409); expect(stale.body.error.message).toBe('Source version conflict');
+    const result=await remove({expectedVersion:2147483647}); expect(result.status).toBe(409); expect(result.body.error.code).toBe('CONFLICT'); expectNoWrites();
+  });
+  it('allows the last valid DELETE increment', async () => {
+    current.version=2147483646;const result=await remove({expectedVersion:2147483646});
+    expect(result.status).toBe(200);expect(result.body.data.version).toBe(2147483647);expect(mocks.audit).toHaveBeenCalledOnce();
+  });
   it.each(Object.values(VerificationStatus))('allows ADMIN to soft-delete %s with safe Audit and a receipt', async status => {
     current.verificationStatus = status;
     const before = { ...current };

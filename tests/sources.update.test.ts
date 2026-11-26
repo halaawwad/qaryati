@@ -67,7 +67,7 @@ beforeEach(() => {
   });
   mocks.audit.mockResolvedValue({ id: 'synthetic-audit-id' });
 });
-function patch(body: unknown = { expectedVersion: 3, title: 'Updated' }, role = 'EDITOR', sourceId = id) {
+function patch(body: object = { expectedVersion: 3, title: 'Updated' }, role = 'EDITOR', sourceId = id) {
   const token = jwt.sign({ role }, secret, { subject: actorId, algorithm: 'HS256', expiresIn: '15m' });
   return request(app).patch(`/api/v1/sources/${sourceId}`).set('Authorization', `Bearer ${token}`).send(body);
 }
@@ -79,6 +79,17 @@ function expectNoWrites() {
 }
 
 describe('PATCH Sources', () => {
+  it('checks exhaustion after authorization, stale version and no-op', async () => {
+    current.version=2147483647;
+    expect((await patch({expectedVersion:2147483648,title:'New'})).status).toBe(400);
+    const stale=await patch({expectedVersion:2147483646,title:'New'}); expect(stale.status).toBe(409); expect(stale.body.error.message).toBe('Source version conflict');
+    const before={...current}; const noop=await patch({expectedVersion:2147483647,title:current.title}); expect(noop.status).toBe(200); expect(current).toEqual(before);
+    const exhausted=await patch({expectedVersion:2147483647,title:'New'}); expect(exhausted.status).toBe(409); expect(exhausted.body.error.code).toBe('CONFLICT'); expectNoWrites();
+  });
+  it('allows the last valid PATCH increment', async () => {
+    current.version=2147483646; const response=await patch({expectedVersion:2147483646,title:'New'});
+    expect(response.status).toBe(200); expect(response.body.data.version).toBe(2147483647); expect(mocks.update).toHaveBeenCalledOnce(); expect(mocks.audit).toHaveBeenCalledOnce();
+  });
   const roles: Role[] = ['EDITOR', 'REVIEWER', 'ADMIN'];
   const matrix = roles.flatMap(role => Object.values(VerificationStatus).flatMap(status =>
     [actorId, otherId, null].map(owner => ({ role, status, owner,
