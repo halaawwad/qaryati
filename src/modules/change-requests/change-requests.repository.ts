@@ -18,6 +18,14 @@ export const changeRequestsRepository = {
    throw error;
   }
  },
+ async approve(id: string, actorId: string, reviewComment: string | undefined, client: Prisma.TransactionClient) {
+  try {
+   return await client.changeRequest.update({where:{id,status:'PENDING'},data:{status:'APPROVED',reviewedById:actorId,reviewComment:reviewComment ?? null,reviewedAt:new Date()}});
+  } catch(error) {
+   if (error instanceof Prisma.PrismaClientKnownRequestError && error.code==='P2025') throw new ConflictError('Change request changed during review');
+   throw error;
+  }
+ },
  create(input: SubmitChangeRequestInput, actorId: string, client: Prisma.TransactionClient) {
   return client.changeRequest.create({data:{entityType:input.entityType,entityId:input.entityId,baseVersion:input.baseVersion,
    proposedChanges:input.proposedChanges,reason:input.reason,requestedById:actorId,status:'PENDING'}});

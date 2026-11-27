@@ -5,6 +5,7 @@ import { villageService } from '../villages/villages.service.js';
 import { sourceService } from '../sources/sources.service.js';
 import { recordAudit } from '../audit/audit.service.js';
 import { populationRepository, type PopulationRepository, type PopulationCreateContext } from './population.repository.js';
+import { populationProposalSchema } from './population.schemas.js';
 import type { CreatePopulationInput, ListPopulationQuery, UpdatePopulationInput, ReviewPopulationInput, SelectPreferredInput } from './population.schemas.js';
 function snapshot(item: import('./population.repository.js').PopulationDetails) {
  return {id:item.id, villageId:item.villageId, population:item.population, referenceYear:item.referenceYear, referenceDate:item.referenceDate?.toISOString() ?? null, sourceId:item.sourceId, isEstimate:item.isEstimate, isPreferred:item.isPreferred, needsReview:item.needsReview, notes:item.notes, verificationStatus:item.verificationStatus, version:item.version};
@@ -24,6 +25,39 @@ function hasChanges(before: import('./population.repository.js').PopulationDetai
 }
 export class PopulationService {
  constructor(private readonly repository: PopulationRepository = populationRepository, private readonly villages: Pick<typeof villageService, 'ensureExists'> = villageService) {}
+ async applyApprovedChange(id:string, baseVersion:number, proposedChanges:unknown, actorId:string, client:Prisma.TransactionClient) {
+  const parsed=populationProposalSchema.safeParse(proposedChanges);
+  if (!parsed.success) throw new ConflictError('Invalid stored population proposal');
+  const changes=parsed.data;
+  const initial=await this.repository.findById(id,client);
+  if (!initial) throw new NotFoundError('Population record not found');
+  await this.villages.ensureExists(initial.villageId,client);
+  let missingSource:NotFoundError | undefined;
+  if (changes.sourceId !== undefined && changes.sourceId.toLowerCase() !== initial.sourceId.toLowerCase()) {
+   try { await sourceService.getById(changes.sourceId,client); }
+   catch (error) { if (error instanceof NotFoundError) missingSource=error; else throw error; }
+  }
+  const current=await this.repository.findForDelete(id,client);
+  if (!current) throw new NotFoundError('Population record not found');
+  if (current.villageId !== initial.villageId || current.sourceId !== initial.sourceId) throw new ConflictError('Population record changed during approval');
+  if (current.verificationStatus !== 'VERIFIED') throw new ConflictError('Only verified population records can be approved');
+  if (current.version !== baseVersion) throw new ConflictError('Population record version conflict');
+  if (missingSource) throw missingSource;
+  const normalized={...changes};
+  if (normalized.sourceId?.toLowerCase() === current.sourceId.toLowerCase()) normalized.sourceId=current.sourceId;
+  if (!hasChanges(current,normalized)) throw new ConflictError('Proposal must change at least one field');
+  ensureVersionCapacity(current.version);
+  let needsReview:boolean | undefined;
+  if (normalized.population !== undefined && normalized.population !== current.population) {
+   const baseline=await this.repository.findLatestVerified(current.villageId,client,id);
+   needsReview=current.needsReview || anomalous(normalized.population,baseline);
+  }
+  await this.repository.update(id,{expectedVersion:baseVersion,...normalized},actorId,client,needsReview);
+  const after=await this.repository.findForDelete(id,client);
+  if (!after) throw new ConflictError('Population record changed during approval');
+  const auditSnapshot=(record:typeof current) => ({...snapshot(record),createdById:record.createdById,updatedById:record.updatedById,verifiedById:record.verifiedById,verifiedAt:record.verifiedAt?.toISOString() ?? null});
+  return {before:auditSnapshot(current),after:auditSnapshot(after)};
+ }
  async validateChangeProposal(id: string, input: UpdatePopulationInput, client: Prisma.TransactionClient): Promise<void> {
   const initial = await this.repository.findById(id, client);
   if (!initial) throw new NotFoundError('Population record not found');

@@ -4,7 +4,8 @@ import { buildPaginationMeta, parsePagination } from '../../shared/pagination.js
 import { recordAudit } from '../audit/audit.service.js';
 import { populationService } from '../population/population.service.js';
 import { changeRequestsRepository } from './change-requests.repository.js';
-import type { ListChangeRequestsQuery, RejectChangeRequestInput, SubmitChangeRequestInput } from './change-requests.schemas.js';
+import { populationParamsSchema, populationProposalSchema } from '../population/population.schemas.js';
+import type { ApproveChangeRequestInput, ListChangeRequestsQuery, RejectChangeRequestInput, SubmitChangeRequestInput } from './change-requests.schemas.js';
 
 function snapshot(item: ChangeRequest) {
  return {id:item.id,entityType:item.entityType,entityId:item.entityId,baseVersion:item.baseVersion,proposedChanges:item.proposedChanges,
@@ -13,6 +14,24 @@ function snapshot(item: ChangeRequest) {
 }
 
 export const changeRequestsService = {
+ async approve(id:string, input:ApproveChangeRequestInput, context:{actorId:string;role:Role;requestId:string}) {
+  if (context.role !== 'REVIEWER' && context.role !== 'ADMIN') throw new ForbiddenError();
+  return changeRequestsRepository.transaction(async client => {
+   const before=await changeRequestsRepository.lockById(id,client);
+   if (!before) throw new NotFoundError('Change request not found');
+   if (before.status !== 'PENDING') throw new ConflictError('Change request is not pending');
+   if (before.requestedById.toLowerCase() === context.actorId.toLowerCase()) throw new ForbiddenError('Self-approval is not permitted');
+   if (before.entityType !== 'PopulationRecord') throw new ConflictError('Unsupported change request entity');
+   const parsed=populationProposalSchema.safeParse(before.proposedChanges);
+   if (!parsed.success) throw new ConflictError('Invalid stored population proposal');
+   if (!populationParamsSchema.safeParse({id:before.entityId}).success) throw new NotFoundError('Population record not found');
+   const population=await populationService.applyApprovedChange(before.entityId,before.baseVersion,parsed.data,context.actorId,client);
+   const after=await changeRequestsRepository.approve(id,context.actorId,input.reviewComment,client);
+   await recordAudit({entityType:'PopulationRecord',entityId:before.entityId,action:'UPDATE',actorId:context.actorId,requestId:context.requestId,before:population.before,after:population.after},client);
+   await recordAudit({entityType:'ChangeRequest',entityId:id,action:'APPROVE',actorId:context.actorId,requestId:context.requestId,before:snapshot(before),after:snapshot(after)},client);
+   return after;
+  });
+ },
  async reject(id:string, input:RejectChangeRequestInput, context:{actorId:string;role:Role;requestId:string}) {
   if (context.role !== 'REVIEWER' && context.role !== 'ADMIN') throw new ForbiddenError();
   return changeRequestsRepository.transaction(async client=>{

@@ -1,16 +1,8 @@
 import { z } from 'zod';
-import { updatePopulationSchema } from '../population/population.schemas.js';
+import { populationProposalSchema, updatePopulationSchema } from '../population/population.schemas.js';
 import { ChangeRequestStatus } from '@prisma/client';
 import { parsePagination } from '../../shared/pagination.js';
 
-const populationProposalSchema = z.strictObject({
- population: updatePopulationSchema.shape.population,
- referenceYear: updatePopulationSchema.shape.referenceYear,
- referenceDate: updatePopulationSchema.shape.referenceDate,
- sourceId: updatePopulationSchema.shape.sourceId.unwrap().transform(value => value.toLowerCase()).optional(),
- isEstimate: updatePopulationSchema.shape.isEstimate,
- notes: updatePopulationSchema.shape.notes,
-}).refine(changes => Object.values(changes).some(value => value !== undefined), {message:'At least one editable field is required'});
 export const submitChangeRequestSchema = z.strictObject({
  entityType: z.literal('PopulationRecord'),
  entityId: z.uuid(),
@@ -28,4 +20,6 @@ export const listChangeRequestsSchema = z.object({
 export const changeRequestParamsSchema = z.object({id:z.uuid()});
 export const rejectChangeRequestSchema = z.strictObject({reviewComment:z.string().trim().min(1).max(5000)});
 export type RejectChangeRequestInput = z.infer<typeof rejectChangeRequestSchema>;
+export const approveChangeRequestSchema = z.strictObject({reviewComment:z.string().trim().min(1).max(5000).optional()});
+export type ApproveChangeRequestInput = z.infer<typeof approveChangeRequestSchema>;
 export type ListChangeRequestsQuery = z.infer<typeof listChangeRequestsSchema>;

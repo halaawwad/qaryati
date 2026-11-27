@@ -1,6 +1,9 @@
 import type { RequestHandler } from 'express';
 import { changeRequestsService } from './change-requests.service.js';
 import type { ListChangeRequestsQuery } from './change-requests.schemas.js';
+export const approve: RequestHandler = async (req,res,next) => {
+ try { const item=await changeRequestsService.approve(String(req.params.id),req.body,{actorId:req.user.id,role:req.user.role,requestId:req.requestId}); res.status(200).json({data:item}); } catch(error) {next(error);}
+};
 export const reject: RequestHandler = async (req,res,next) => {
  try { const item=await changeRequestsService.reject(String(req.params.id),req.body,{actorId:req.user.id,role:req.user.role,requestId:req.requestId}); res.status(200).json({data:item}); } catch(error) {next(error);}
 };

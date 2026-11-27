@@ -22,6 +22,14 @@ export const updatePopulationSchema = z.strictObject({
  notes: createPopulationSchema.shape.notes,
 }).refine(({expectedVersion: _version, ...changes}) => Object.values(changes).some(value => value !== undefined), {message: 'At least one editable field is required'});
 export type UpdatePopulationInput = z.infer<typeof updatePopulationSchema>;
+export const populationProposalSchema = z.strictObject({
+ population: updatePopulationSchema.shape.population,
+ referenceYear: updatePopulationSchema.shape.referenceYear,
+ referenceDate: updatePopulationSchema.shape.referenceDate,
+ sourceId: updatePopulationSchema.shape.sourceId.unwrap().transform(value => value.toLowerCase()).optional(),
+ isEstimate: updatePopulationSchema.shape.isEstimate,
+ notes: updatePopulationSchema.shape.notes,
+}).refine(changes => Object.values(changes).some(value => value !== undefined), {message:'At least one editable field is required'});
 export const reviewPopulationSchema = z.strictObject({expectedVersion: z.number().int().positive().max(2147483647)});
 export type ReviewPopulationInput = z.infer<typeof reviewPopulationSchema>;
 const preferredVersion = z.number().int().positive().max(2147483647);
