@@ -236,3 +236,126 @@ describe('Submission and parent deletion races',()=>{
   expect(await db.auditLog.count({where:{requestId:deleteId,action:'DELETE'}})).toBe(1);
  },15000);
 });
+
+function approve(f:Fixture,id:string,rid=requestId()) {
+ const token=jwt.sign({role:'ADMIN'},secret,{subject:f.adminId});
+ return request(app).post(`/api/v1/change-requests/${id}/approve`).set('Authorization',`Bearer ${token}`).set('X-Request-Id',rid).send({reviewComment:' accepted '});
+}
+
+describe('Change Request approval with PostgreSQL',()=>{
+ it('persists the update, metadata, and both audit snapshots; other proposals remain pending and stale',async()=>{
+  const f=await fixture(),first=await submit(f,{population:151}),second=await submit(f,{notes:'another'});
+  expect(first.status).toBe(201);expect(second.status).toBe(201);
+  const before=await db.populationRecord.findUniqueOrThrow({where:{id:f.id}}),rid=requestId();
+  const res=await approve(f,first.body.data.id,rid);expect(res.status).toBe(200);expect(res.body.data).toMatchObject({status:'APPROVED',reviewedById:f.adminId,reviewComment:'accepted'});
+  const after=await db.populationRecord.findUniqueOrThrow({where:{id:f.id}});
+  expect(after).toMatchObject({population:151,version:4,verificationStatus:'VERIFIED',verifiedById:before.verifiedById,verifiedAt:before.verifiedAt,isPreferred:true,needsReview:true,updatedById:f.adminId});
+  const audits=await db.auditLog.findMany({where:{requestId:rid},orderBy:{entityType:'asc'}});expect(audits).toHaveLength(2);
+  expect(audits[0]).toMatchObject({entityType:'ChangeRequest',action:'APPROVE',actorId:f.adminId,before:{status:'PENDING'},after:{status:'APPROVED',reviewedById:f.adminId}});
+  expect(audits[1]).toMatchObject({entityType:'PopulationRecord',action:'UPDATE',actorId:f.adminId,before:{population:100,version:3},after:{population:151,version:4}});
+  const staleId=requestId();expect((await approve(f,second.body.data.id,staleId)).status).toBe(409);expect((await db.changeRequest.findUniqueOrThrow({where:{id:second.body.data.id}})).status).toBe('PENDING');expect(await db.auditLog.count({where:{requestId:staleId}})).toBe(0);
+  const token=jwt.sign({role:'ADMIN'},secret,{subject:f.adminId});const historical=await request(app).get(`/api/v1/change-requests/${second.body.data.id}`).set('Authorization',`Bearer ${token}`);expect(historical.status).toBe(200);expect(historical.body.data.status).toBe('PENDING');
+ });
+ it.each(['PopulationRecord','ChangeRequest'] as const)('rolls back both changes and audits when the %s audit fails',async entity=>{
+  const f=await fixture(),submitted=await submit(f,{notes:'changed'}),before=await db.populationRecord.findUniqueOrThrow({where:{id:f.id}}),rid=requestId();
+  const {auditRepository}=await import('../../src/modules/audit/audit.repository.js');const original=auditRepository.create.bind(auditRepository);
+  vi.spyOn(auditRepository,'create').mockImplementation(async(input,client)=>{if(input.entityType===entity)throw new Error('injected audit failure');return original(input,client);});
+  expect((await approve(f,submitted.body.data.id,rid)).status).toBe(500);
+  expect(await db.populationRecord.findUniqueOrThrow({where:{id:f.id}})).toEqual(before);expect((await db.changeRequest.findUniqueOrThrow({where:{id:submitted.body.data.id}})).status).toBe('PENDING');expect(await db.auditLog.count({where:{requestId:rid}})).toBe(0);
+ });
+ it('rolls back the Population update when the guarded request transition fails',async()=>{
+  const f=await fixture(),submitted=await submit(f,{notes:'changed'}),before=await db.populationRecord.findUniqueOrThrow({where:{id:f.id}}),rid=requestId();
+  const {changeRequestsRepository}=await import('../../src/modules/change-requests/change-requests.repository.js');vi.spyOn(changeRequestsRepository,'approve').mockRejectedValueOnce(new Error('injected guarded transition failure'));
+  expect((await approve(f,submitted.body.data.id,rid)).status).toBe(500);expect(await db.populationRecord.findUniqueOrThrow({where:{id:f.id}})).toEqual(before);expect((await db.changeRequest.findUniqueOrThrow({where:{id:submitted.body.data.id}})).status).toBe('PENDING');expect(await db.auditLog.count({where:{requestId:rid}})).toBe(0);
+ });
+ it('serializes two approvals on the request row',async()=>{
+  const f=await fixture(),submitted=await submit(f,{notes:'changed'}),id=submitted.body.data.id;
+  const {changeRequestsRepository}=await import('../../src/modules/change-requests/change-requests.repository.js');const original=changeRequestsRepository.lockById.bind(changeRequestsRepository),held=gate(),locked=gate(),waiting=gate();let calls=0,holder=0,waiter=0;
+  vi.spyOn(changeRequestsRepository,'lockById').mockImplementation(async(requestId,client)=>{const n=++calls,pid=(await client.$queryRaw<Array<{pid:number}>>`SELECT pg_backend_pid() AS pid`)[0]!.pid;if(n===2){waiter=pid;waiting.release();}const result=await original(requestId,client);if(n===1){holder=pid;locked.release();await deadline(held.wait);}return result;});
+  const firstId=requestId(),secondId=requestId(),first=settled(Promise.resolve(approve(f,id,firstId)));let second:typeof first|undefined;
+  try{await deadline(locked.wait);second=settled(Promise.resolve(approve(f,id,secondId)));await deadline(waiting.wait);await blockedBy(waiter,holder);}finally{held.release();await first;if(second)await second;}
+  const a=await first,b=await second!;expect(a.ok&&a.value.status).toBe(200);expect(b.ok&&b.value.status).toBe(409);expect(await db.auditLog.count({where:{requestId:firstId}})).toBe(2);expect(await db.auditLog.count({where:{requestId:secondId}})).toBe(0);
+ },15000);
+ it('serializes competing proposals against the same target and leaves the loser pending',async()=>{
+  const f=await fixture(),one=await submit(f,{notes:'first'}),two=await submit(f,{notes:'second'});
+  const held=gate(),locked=gate(),waiting=gate(),original=repository.findForDelete.bind(repository);let calls=0,holder=0,waiter=0;
+  vi.spyOn(repository,'findForDelete').mockImplementation(async(id,client)=>{const n=++calls,pid=(await client.$queryRaw<Array<{pid:number}>>`SELECT pg_backend_pid() AS pid`)[0]!.pid;if(n===2){waiter=pid;waiting.release();}const result=await original(id,client);if(n===1){holder=pid;locked.release();await deadline(held.wait);}return result;});
+  const firstId=requestId(),secondId=requestId(),first=settled(Promise.resolve(approve(f,one.body.data.id,firstId)));let second:typeof first|undefined;
+  try{await deadline(locked.wait);second=settled(Promise.resolve(approve(f,two.body.data.id,secondId)));await deadline(waiting.wait);await blockedBy(waiter,holder);}finally{held.release();await first;if(second)await second;}
+  const a=await first,b=await second!;expect(a.ok&&a.value.status).toBe(200);expect(b.ok&&b.value.status).toBe(409);expect((await db.changeRequest.findUniqueOrThrow({where:{id:two.body.data.id}})).status).toBe('PENDING');expect(await db.auditLog.count({where:{requestId:secondId}})).toBe(0);
+ },15000);
+ it('serializes approval against rejection of the same request',async()=>{
+  const f=await fixture(),submitted=await submit(f,{notes:'changed'}),id=submitted.body.data.id,held=gate(),locked=gate(),waiting=gate();
+  const {changeRequestsRepository}=await import('../../src/modules/change-requests/change-requests.repository.js');const original=changeRequestsRepository.lockById.bind(changeRequestsRepository);let calls=0,holder=0,waiter=0;
+  vi.spyOn(changeRequestsRepository,'lockById').mockImplementation(async(requestId,client)=>{const n=++calls,pid=(await client.$queryRaw<Array<{pid:number}>>`SELECT pg_backend_pid() AS pid`)[0]!.pid;if(n===2){waiter=pid;waiting.release();}const result=await original(requestId,client);if(n===1){holder=pid;locked.release();await deadline(held.wait);}return result;});
+  const firstId=requestId(),secondId=requestId(),first=settled(Promise.resolve(approve(f,id,firstId)));let second:typeof first|undefined;
+  try{await deadline(locked.wait);const token=jwt.sign({role:'ADMIN'},secret,{subject:f.adminId});second=settled(Promise.resolve(request(app).post(`/api/v1/change-requests/${id}/reject`).set('Authorization',`Bearer ${token}`).set('X-Request-Id',secondId).send({reviewComment:'reject'})));await deadline(waiting.wait);await blockedBy(waiter,holder);}finally{held.release();await first;if(second)await second;}
+  const a=await first,b=await second!;expect(a.ok&&a.value.status).toBe(200);expect(b.ok&&b.value.status).toBe(409);expect(await db.auditLog.count({where:{requestId:firstId}})).toBe(2);expect(await db.auditLog.count({where:{requestId:secondId}})).toBe(0);
+ },15000);
+ it('leaves the Population unchanged when rejection wins the request lock',async()=>{
+  const f=await fixture(),submitted=await submit(f,{notes:'changed'}),id=submitted.body.data.id,held=gate(),locked=gate(),waiting=gate(),before=await db.populationRecord.findUniqueOrThrow({where:{id:f.id}});
+  const {changeRequestsRepository}=await import('../../src/modules/change-requests/change-requests.repository.js');const original=changeRequestsRepository.lockById.bind(changeRequestsRepository);let calls=0,holder=0,waiter=0;
+  vi.spyOn(changeRequestsRepository,'lockById').mockImplementation(async(requestId,client)=>{const n=++calls,pid=(await client.$queryRaw<Array<{pid:number}>>`SELECT pg_backend_pid() AS pid`)[0]!.pid;if(n===2){waiter=pid;waiting.release();}const result=await original(requestId,client);if(n===1){holder=pid;locked.release();await deadline(held.wait);}return result;});
+  const rejectId=requestId(),approveId=requestId(),token=jwt.sign({role:'ADMIN'},secret,{subject:f.adminId});const first=settled(Promise.resolve(request(app).post(`/api/v1/change-requests/${id}/reject`).set('Authorization',`Bearer ${token}`).set('X-Request-Id',rejectId).send({reviewComment:'reject'})));let second:typeof first|undefined;
+  try{await deadline(locked.wait);second=settled(Promise.resolve(approve(f,id,approveId)));await deadline(waiting.wait);await blockedBy(waiter,holder);}finally{held.release();await first;if(second)await second;}
+  const a=await first,b=await second!;expect(a.ok&&a.value.status).toBe(200);expect(b.ok&&b.value.status).toBe(409);expect(await db.populationRecord.findUniqueOrThrow({where:{id:f.id}})).toEqual(before);expect((await db.changeRequest.findUniqueOrThrow({where:{id}})).status).toBe('REJECTED');expect(await db.auditLog.count({where:{requestId:approveId}})).toBe(0);
+ },15000);
+ it.each(['patch','delete','reject','verify'] as const)('serializes approval before Population %s',async operation=>{
+  const f=await fixture(),submitted=await submit(f,{notes:'approved'}),held=gate(),locked=gate();let holder=0;
+  const original=repository.findForDelete.bind(repository);let paused=false;
+  vi.spyOn(repository,'findForDelete').mockImplementation(async(id,client)=>{const result=await original(id,client);if(!paused){paused=true;holder=(await client.$queryRaw<Array<{pid:number}>>`SELECT pg_backend_pid() AS pid`)[0]!.pid;locked.release();await deadline(held.wait);}return result;});
+  const firstId=requestId(),secondId=requestId(),context={actorId:f.adminId,role:'ADMIN' as const,requestId:secondId};
+  const first=settled(Promise.resolve(approve(f,submitted.body.data.id,firstId)));let second:ReturnType<typeof settled<unknown>>|undefined;
+  try{await deadline(locked.wait);second=settled<unknown>(operation==='patch'?population.update(f.id,{expectedVersion:3,notes:'direct'},context):operation==='delete'?population.softDelete(f.id,context):population.review(f.id,{expectedVersion:3},operation==='verify'?'VERIFIED':'REJECTED',context));await blockedByAny(holder);}finally{held.release();await first;if(second)await second;}
+  const a=await first,b=await second!;expect(a.ok&&a.value.status).toBe(200);if(operation==='delete')expect(b.ok).toBe(true);else expect(b.ok).toBe(false);expect((await db.changeRequest.findUniqueOrThrow({where:{id:submitted.body.data.id}})).status).toBe('APPROVED');
+ },15000);
+ it.each(['patch','delete','reject','verify'] as const)('revalidates approval after Population %s wins the row lock',async operation=>{
+  const f=await fixture(),submitted=await submit(f,{notes:'approved'}),held=gate(),locked=gate();let holder=0,paused=false;
+  const originalDelete=repository.findForDelete.bind(repository),originalUpdate=repository.findForUpdate.bind(repository);
+  vi.spyOn(repository,'findForDelete').mockImplementation(async(id,client)=>{const result=await originalDelete(id,client);if(operation!=='patch'&&!paused){paused=true;holder=(await client.$queryRaw<Array<{pid:number}>>`SELECT pg_backend_pid() AS pid`)[0]!.pid;locked.release();await deadline(held.wait);}return result;});
+  vi.spyOn(repository,'findForUpdate').mockImplementation(async(id,client)=>{const result=await originalUpdate(id,client);if(operation==='patch'&&!paused){paused=true;holder=(await client.$queryRaw<Array<{pid:number}>>`SELECT pg_backend_pid() AS pid`)[0]!.pid;locked.release();await deadline(held.wait);}return result;});
+  const firstId=requestId(),secondId=requestId(),context={actorId:f.adminId,role:'ADMIN' as const,requestId:firstId};
+  const first=settled<unknown>(operation==='patch'?population.update(f.id,{expectedVersion:3,notes:'direct'},context):operation==='delete'?population.softDelete(f.id,context):population.review(f.id,{expectedVersion:3},operation==='verify'?'VERIFIED':'REJECTED',context));let second:ReturnType<typeof settled<Awaited<ReturnType<typeof approve>>>>|undefined;
+  try{await deadline(locked.wait);second=settled(Promise.resolve(approve(f,submitted.body.data.id,secondId)));await blockedByAny(holder);}finally{held.release();await first;if(second)await second;}
+  const a=await first,b=await second!;expect(a.ok).toBe(true);expect(b.ok&&b.value.status).toBe(operation==='delete'?404:operation==='verify'?200:409);expect((await db.changeRequest.findUniqueOrThrow({where:{id:submitted.body.data.id}})).status).toBe(operation==='verify'?'APPROVED':'PENDING');expect(await db.auditLog.count({where:{requestId:secondId}})).toBe(operation==='verify'?2:0);
+ },15000);
+ it.each([['village','approval'],['village','deletion'],['source','approval'],['source','deletion']] as const)('serializes approval and %s deletion with %s first',async(kind,firstOperation)=>{
+  const f=await fixture(),submitted=await submit(f,kind==='source'?{sourceId:f.otherSourceId}:{notes:'approved'}),held=gate(),locked=gate();let holder=0;
+  const {villageService}=await import('../../src/modules/villages/villages.service.js');const {sourceRepository}=await import('../../src/modules/sources/sources.repository.js');const {sourceService}=await import('../../src/modules/sources/sources.service.js');const audit=await import('../../src/modules/audit/audit.service.js');
+  const originalAudit=audit.recordAudit.bind(audit),ensure=villageService.ensureExists.bind(villageService),findSource=sourceRepository.findById.bind(sourceRepository);const approveId=requestId(),deleteId=requestId();
+  vi.spyOn(audit,'recordAudit').mockImplementation(async(input,client)=>{const result=await originalAudit(input,client);if(firstOperation==='deletion'&&client&&input.requestId===deleteId){holder=(await client.$queryRaw<Array<{pid:number}>>`SELECT pg_backend_pid() AS pid`)[0]!.pid;locked.release();await deadline(held.wait);}return result;});
+  vi.spyOn(villageService,'ensureExists').mockImplementation(async(id,client)=>{await ensure(id,client);if(kind==='village'&&firstOperation==='approval'&&client&&id===f.villageId){holder=(await client.$queryRaw<Array<{pid:number}>>`SELECT pg_backend_pid() AS pid`)[0]!.pid;locked.release();await deadline(held.wait);}});
+  vi.spyOn(sourceRepository,'findById').mockImplementation(async(id,client)=>{const result=await findSource(id,client);if(kind==='source'&&firstOperation==='approval'&&client&&id===f.otherSourceId){holder=(await client.$queryRaw<Array<{pid:number}>>`SELECT pg_backend_pid() AS pid`)[0]!.pid;locked.release();await deadline(held.wait);}return result;});
+  const approveAction=()=>settled(Promise.resolve(approve(f,submitted.body.data.id,approveId)));
+  const deleteAction=()=>settled<unknown>(kind==='source'?sourceService.softDelete(f.otherSourceId,{expectedVersion:1},{actorId:f.adminId,role:'ADMIN',requestId:deleteId}):villageService.remove(f.villageId,{userId:f.adminId,role:'ADMIN',requestId:deleteId}));
+  const first=firstOperation==='approval'?approveAction():deleteAction();let second:ReturnType<typeof approveAction>|ReturnType<typeof deleteAction>|undefined;
+  try{await deadline(locked.wait);second=firstOperation==='approval'?deleteAction():approveAction();await blockedByAny(holder);}finally{held.release();await first;if(second)await second;}
+  const a=await first,b=await second!;expect(a.ok).toBe(true);expect(b.ok).toBe(true);const approved=firstOperation==='approval'?a:b;if(approved.ok)expect((approved.value as Awaited<ReturnType<typeof approve>>).status).toBe(firstOperation==='approval'?200:404);
+  expect((await db.changeRequest.findUniqueOrThrow({where:{id:submitted.body.data.id}})).status).toBe(firstOperation==='approval'?'APPROVED':'PENDING');expect(await db.auditLog.count({where:{requestId:approveId}})).toBe(firstOperation==='approval'?2:0);
+ },15000);
+ it.each(['approval','selection'] as const)('serializes approval and preferred selection with %s first',async firstOperation=>{
+  const f=await fixture(),submitted=await submit(f,{notes:'approved'}),other=randomUUID(),held=gate(),locked=gate(),waiting=gate();ids.records.add(other);
+  await db.populationRecord.create({data:{id:other,villageId:f.villageId,sourceId:f.otherSourceId,population:120,referenceYear:2020,verificationStatus:'VERIFIED',version:1}});
+  const find=repository.findForDelete.bind(repository),rows=repository.lockPreferredRows.bind(repository);let holder=0,waiter=0,paused=false,announced=false;
+  vi.spyOn(repository,'findForDelete').mockImplementation(async(id,client)=>{const pid=(await client.$queryRaw<Array<{pid:number}>>`SELECT pg_backend_pid() AS pid`)[0]!.pid;if(firstOperation==='selection'&&!announced){announced=true;waiter=pid;waiting.release();}const result=await find(id,client);if(firstOperation==='approval'&&!paused){paused=true;holder=pid;locked.release();await deadline(held.wait);}return result;});
+  vi.spyOn(repository,'lockPreferredRows').mockImplementation(async(idsToLock,client)=>{const pid=(await client.$queryRaw<Array<{pid:number}>>`SELECT pg_backend_pid() AS pid`)[0]!.pid;if(firstOperation==='approval'){waiter=pid;waiting.release();}const result=await rows(idsToLock,client);if(firstOperation==='selection'){paused=true;holder=pid;locked.release();await deadline(held.wait);}return result;});
+  const approveId=requestId(),selectId=requestId();const approveAction=()=>settled(Promise.resolve(approve(f,submitted.body.data.id,approveId)));const selectAction=()=>settled(population.selectPreferred(other,{expectedVersion:1,expectedPreferred:{id:f.id,version:3}},{actorId:f.adminId,role:'ADMIN',requestId:selectId}));
+  const first=firstOperation==='approval'?approveAction():selectAction();let second:ReturnType<typeof approveAction>|ReturnType<typeof selectAction>|undefined;
+  try{await deadline(locked.wait);second=firstOperation==='approval'?selectAction():approveAction();await deadline(waiting.wait);await blockedBy(waiter,holder);}finally{held.release();await first;if(second)await second;}
+  const a=await first,b=await second!;expect(a.ok).toBe(true);if(firstOperation==='approval'){expect((a as {ok:true;value:Awaited<ReturnType<typeof approve>>}).value.status).toBe(200);expect(b.ok).toBe(false);}else{expect(b.ok&&(b.value as Awaited<ReturnType<typeof approve>>).status).toBe(409);}
+ },15000);
+ it.each(['business key','preferred slot'] as const)('rolls back a %s uniqueness conflict',async kind=>{
+  const f=await fixture(),submitted=await submit(f,{referenceYear:2021}),other=randomUUID();ids.records.add(other);
+  await db.populationRecord.create({data:{id:other,villageId:f.villageId,sourceId:kind==='business key'?f.sourceId:f.otherSourceId,population:120,referenceYear:2021,verificationStatus:'VERIFIED',isPreferred:kind==='preferred slot'}});
+  const before=await db.populationRecord.findUniqueOrThrow({where:{id:f.id}}),rid=requestId();expect((await approve(f,submitted.body.data.id,rid)).status).toBe(409);expect(await db.populationRecord.findUniqueOrThrow({where:{id:f.id}})).toEqual(before);expect((await db.changeRequest.findUniqueOrThrow({where:{id:submitted.body.data.id}})).status).toBe('PENDING');expect(await db.auditLog.count({where:{requestId:rid}})).toBe(0);
+ });
+ it.each([[2147483646,200],[2147483647,409]] as const)('handles version %i',async(version,status)=>{
+  const f=await fixture(),submitted=await submit(f,{notes:'changed'});await db.populationRecord.update({where:{id:f.id},data:{version}});await db.changeRequest.update({where:{id:submitted.body.data.id},data:{baseVersion:version}});
+  const rid=requestId();expect((await approve(f,submitted.body.data.id,rid)).status).toBe(status);expect((await db.populationRecord.findUniqueOrThrow({where:{id:f.id}})).version).toBe(2147483647);expect((await db.changeRequest.findUniqueOrThrow({where:{id:submitted.body.data.id}})).status).toBe(status===200?'APPROVED':'PENDING');expect(await db.auditLog.count({where:{requestId:rid}})).toBe(status===200?2:0);
+ });
+ it('rejects malformed stored proposals without changing state',async()=>{
+  const f=await fixture(),submitted=await submit(f,{notes:'changed'}),id=submitted.body.data.id;
+  await db.changeRequest.update({where:{id},data:{proposedChanges:{isPreferred:false}}});const before=await db.populationRecord.findUniqueOrThrow({where:{id:f.id}}),rid=requestId();
+  expect((await approve(f,id,rid)).status).toBe(409);expect(await db.populationRecord.findUniqueOrThrow({where:{id:f.id}})).toEqual(before);expect((await db.changeRequest.findUniqueOrThrow({where:{id}})).status).toBe('PENDING');expect(await db.auditLog.count({where:{requestId:rid}})).toBe(0);
+ });
+});

@@ -84,7 +84,8 @@ describe('submission with a constrained pool', () => {
   let constrained: PrismaClientType | undefined;
   let verified = false;
   let submit: typeof import('../../src/modules/change-requests/change-requests.service.js').changeRequestsService.submit;
-  const ids = { actor: randomUUID(), governorate: randomUUID(), village: randomUUID(), source: randomUUID(), population: randomUUID() };
+  let approve: typeof import('../../src/modules/change-requests/change-requests.service.js').changeRequestsService.approve;
+  const ids = { actor: randomUUID(), reviewer: randomUUID(), governorate: randomUUID(), village: randomUUID(), source: randomUUID(), population: randomUUID() };
 
   beforeAll(async () => {
     if (process.env.QARYATI_POSTGRES_INTEGRATION !== '1') throw new Error('PostgreSQL integration opt-in required');
@@ -94,6 +95,7 @@ describe('submission with a constrained pool', () => {
     setup = new PrismaClient();
     await initializeVerified(setup, process.env.QARYATI_DISPOSABLE_MARKER, () => { verified = true; }, async () => {
       await setup!.user.create({data:{id:ids.actor,email:`${ids.actor}@integration.invalid`,fullName:'Fixture',passwordHash:'unused',role:'EDITOR'}});
+      await setup!.user.create({data:{id:ids.reviewer,email:`${ids.reviewer}@integration.invalid`,fullName:'Reviewer fixture',passwordHash:'unused',role:'REVIEWER'}});
       await setup!.governorate.create({data:{id:ids.governorate,nameAr:`ar-${ids.governorate}`,nameEn:`en-${ids.governorate}`,code:`i-${ids.governorate}`}});
       await setup!.village.create({data:{id:ids.village,governorateId:ids.governorate,slug:`integration-${ids.village}`,nameAr:'Fixture'}});
       await setup!.source.create({data:{id:ids.source,title:'Fixture',sourceType:'BOOK'}});
@@ -106,6 +108,7 @@ describe('submission with a constrained pool', () => {
     vi.doMock('../../src/shared/db.js', () => ({ prisma: constrained }));
     vi.doMock('../../src/shared/cache.js', () => ({ redis: {} }));
     submit = (await import('../../src/modules/change-requests/change-requests.service.js')).changeRequestsService.submit;
+    approve = (await import('../../src/modules/change-requests/change-requests.service.js')).changeRequestsService.approve;
   }, 15000);
 
   afterAll(async () => {
@@ -115,13 +118,14 @@ describe('submission with a constrained pool', () => {
       if (setup) {
         const db = setup;
         await cleanupIfVerified(verified, [
-          () => db.auditLog.deleteMany({where:{actorId:ids.actor}}),
+          () => db.auditLog.deleteMany({where:{actorId:{in:[ids.actor,ids.reviewer]}}}),
           () => db.changeRequest.deleteMany({where:{requestedById:ids.actor}}),
           () => db.populationRecord.deleteMany({where:{id:ids.population}}),
           () => db.village.deleteMany({where:{id:ids.village}}),
           () => db.source.deleteMany({where:{id:ids.source}}),
           () => db.governorate.deleteMany({where:{id:ids.governorate}}),
           () => db.user.deleteMany({where:{id:ids.actor}}),
+          () => db.user.deleteMany({where:{id:ids.reviewer}}),
         ], attempt);
       }
     } finally {
@@ -148,5 +152,18 @@ describe('submission with a constrained pool', () => {
     expect(result.status).toBe('PENDING');
     expect(await setup!.changeRequest.findUnique({where:{id:result.id}})).toMatchObject({status:'PENDING',entityId:ids.population,baseVersion:3});
     expect(await setup!.auditLog.count({where:{entityId:result.id,requestId,action:'CREATE'}})).toBe(1);
+  }, 10000);
+
+  it('approves and records both audits with one pooled connection', async () => {
+    expect((await import('../../src/shared/db.js')).prisma).toBe(constrained);
+    const pending=await submit({entityType:'PopulationRecord',entityId:ids.population,baseVersion:3,proposedChanges:{population:150}}, {actorId:ids.actor,role:'EDITOR',requestId:randomUUID()});
+    const requestId=randomUUID();
+    const result=await approve(pending.id,{}, {actorId:ids.reviewer,role:'REVIEWER',requestId});
+    expect(result).toMatchObject({status:'APPROVED',reviewedById:ids.reviewer,reviewComment:null});
+    expect(await setup!.populationRecord.findUnique({where:{id:ids.population}})).toMatchObject({population:150,version:4,verificationStatus:'VERIFIED',updatedById:ids.reviewer});
+    expect(await setup!.changeRequest.findUnique({where:{id:pending.id}})).toMatchObject({status:'APPROVED',reviewedById:ids.reviewer});
+    const audits=await setup!.auditLog.findMany({where:{requestId},orderBy:{entityType:'asc'}});
+    expect(audits).toHaveLength(2);
+    expect(audits.map(audit=>[audit.entityType,audit.action])).toEqual([['ChangeRequest','APPROVE'],['PopulationRecord','UPDATE']]);
   }, 10000);
 });
