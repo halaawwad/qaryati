@@ -22,12 +22,17 @@ function gate(){let release!:()=>void;const wait=new Promise<void>(resolve=>{rel
 function settled<T>(promise:Promise<T>){return promise.then(value=>({ok:true as const,value}),error=>({ok:false as const,error}));}
 async function deadline<T>(promise:Promise<T>):Promise<T>{let timer:ReturnType<typeof setTimeout>|undefined;try{return await Promise.race([promise,new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error('Synchronization timeout')),5000);})]);}finally{if(timer)clearTimeout(timer);}}
 async function blockedBy(waiter:number,holder:number){const end=Date.now()+5000;while(Date.now()<end){const rows=await db.$queryRaw<Array<{blocked:boolean}>>`SELECT ${holder}::integer = ANY(pg_blocking_pids(${waiter}::integer)) AS blocked`;if(rows[0]?.blocked)return;await delay(30);}throw new Error('Expected PostgreSQL lock contention was not observed');}
+async function blockedByAny(holder:number){const end=Date.now()+5000;while(Date.now()<end){const rows=await db.$queryRaw<Array<{blocked:boolean}>>`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE ${holder}::integer = ANY(pg_blocking_pids(pid))) AS blocked`;if(rows[0]?.blocked)return;await delay(30);}throw new Error('Expected PostgreSQL lock contention was not observed');}
 beforeAll(async()=>{
  validateTarget();
  try {
   const {PrismaClient}=await import('@prisma/client');db=new PrismaClient({log:[]});
   const identity=await db.$queryRaw<Array<{database:string;username:string}>>`SELECT current_database() AS database, current_user AS username`;
   if(identity.length!==1||identity[0]?.database!=='qaryati_local'||identity[0]?.username!=='qaryati_local') throw new Error();
+  const marker=process.env.QARYATI_DISPOSABLE_MARKER;
+  if(!marker||!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(marker))throw new Error('Disposable marker required');
+  const safety=await db.$queryRaw<Array<{marker:string}>>`SELECT marker::text AS marker FROM qaryati_test_safety.disposable_instance LIMIT 2`;
+  if(safety.length!==1||safety[0]?.marker.toLowerCase()!==marker.toLowerCase())throw new Error('Disposable marker mismatch');
   verified=true;vi.stubEnv('NODE_ENV','test');vi.stubEnv('LOG_LEVEL','silent');vi.stubEnv('RATE_LIMIT_ENABLED','false');vi.stubEnv('REDIS_URL','redis://127.0.0.1:6379');vi.stubEnv('JWT_ACCESS_SECRET',secret);
   vi.doMock('../../src/shared/db.js',()=>({prisma:db}));vi.doMock('../../src/shared/cache.js',()=>({redis:{}}));
   population=(await import('../../src/modules/population/population.service.js')).populationService;
@@ -39,7 +44,7 @@ afterEach(async()=>{
  vi.restoreAllMocks();if(!verified)return;
  const changes=await db.changeRequest.findMany({where:{entityType:'PopulationRecord',entityId:{in:[...ids.records]}},select:{id:true,requestedById:true}});
  if(changes.some(c=>!ids.users.has(c.requestedById)))throw new Error('Change request fixture ownership could not be established');
- const audits=await db.auditLog.findMany({where:{OR:[{entityType:'PopulationRecord',entityId:{in:[...ids.records]}},{entityType:'ChangeRequest',entityId:{in:changes.map(c=>c.id)}}]},select:{id:true,actorId:true,requestId:true}});
+ const audits=await db.auditLog.findMany({where:{OR:[{entityType:'PopulationRecord',entityId:{in:[...ids.records]}},{entityType:'ChangeRequest',entityId:{in:changes.map(c=>c.id)}},{entityType:'Source',entityId:{in:[...ids.sources]}},{entityType:'village',entityId:{in:[...ids.villages]}}]},select:{id:true,actorId:true,requestId:true}});
  if(audits.some(a=>!a.actorId||!ids.users.has(a.actorId)||!a.requestId||!ids.requests.has(a.requestId)))throw new Error('Audit fixture ownership could not be established');
  await db.auditLog.deleteMany({where:{id:{in:audits.map(a=>a.id)}}});
  await db.changeRequest.deleteMany({where:{id:{in:changes.map(c=>c.id)}}});
@@ -109,6 +114,51 @@ describe('Change Request submission with PostgreSQL',()=>{
 });
 
 describe('Submission and Population row-lock races',()=>{
+ it('serializes simultaneous submissions while preserving both requests and audits',async()=>{
+  const f=await fixture(),held=gate(),locked=gate(),waiting=gate(),original=repository.findForUpdate.bind(repository);let holder=0,waiter=0,calls=0;
+  vi.spyOn(repository,'findForUpdate').mockImplementation(async(id,client)=>{
+   const position=++calls,pid=(await client.$queryRaw<Array<{pid:number}>>`SELECT pg_backend_pid() AS pid`)[0]!.pid;
+   if(position===2){waiter=pid;waiting.release();}const row=await original(id,client);
+   if(position===1){holder=pid;locked.release();await deadline(held.wait);}return row;
+  });
+  const firstId=requestId(),secondId=requestId(),first=settled(Promise.resolve(submit(f,{population:150},3,firstId)));let second:ReturnType<typeof settled<Awaited<ReturnType<typeof submit>>>>|undefined;
+  try{await deadline(locked.wait);second=settled(Promise.resolve(submit(f,{population:160},3,secondId)));await deadline(waiting.wait);await blockedBy(waiter,holder);}
+  finally{held.release();await first;if(second)await second;}
+  const a=await first,b=await second!;expect(a.ok).toBe(true);expect(b.ok).toBe(true);
+  if(a.ok&&b.ok){expect(a.value.status).toBe(201);expect(b.value.status).toBe(201);expect(a.value.body.data.id).not.toBe(b.value.body.data.id);}
+  expect(await db.changeRequest.count({where:{entityId:f.id,status:'PENDING',baseVersion:3}})).toBe(2);
+  for(const rid of [firstId,secondId])expect(await db.auditLog.count({where:{requestId:rid,entityType:'ChangeRequest',action:'CREATE'}})).toBe(1);
+  expect(await db.populationRecord.findUniqueOrThrow({where:{id:f.id}})).toMatchObject({version:3,verificationStatus:'VERIFIED'});
+ },15000);
+ it.each(['submission','selection'] as const)('rechecks the version when %s acquires the Population lock first',async firstOperation=>{
+  const f=await fixture(),other=randomUUID(),held=gate(),locked=gate(),waiting=gate();ids.records.add(other);
+  await db.populationRecord.create({data:{id:other,villageId:f.villageId,sourceId:f.otherSourceId,population:120,referenceYear:2020,verificationStatus:'VERIFIED',version:1}});
+  const getUpdate=repository.findForUpdate.bind(repository),getRows=repository.lockPreferredRows.bind(repository);let holder=0,waiter=0;
+  vi.spyOn(repository,'findForUpdate').mockImplementation(async(id,client)=>{
+   const pid=(await client.$queryRaw<Array<{pid:number}>>`SELECT pg_backend_pid() AS pid`)[0]!.pid;
+   if(firstOperation==='selection'){waiter=pid;waiting.release();}const result=await getUpdate(id,client);
+   if(firstOperation==='submission'){holder=pid;locked.release();await deadline(held.wait);}return result;
+  });
+  vi.spyOn(repository,'lockPreferredRows').mockImplementation(async(idsToLock,client)=>{
+   const pid=(await client.$queryRaw<Array<{pid:number}>>`SELECT pg_backend_pid() AS pid`)[0]!.pid;
+   if(firstOperation==='submission'){waiter=pid;waiting.release();}const result=await getRows(idsToLock,client);
+   if(firstOperation==='selection'){holder=pid;locked.release();await deadline(held.wait);}return result;
+  });
+  const submitId=requestId(),selectId=requestId(),ctx={actorId:f.adminId,role:'ADMIN' as const,requestId:selectId};
+  const submitAction=()=>settled(Promise.resolve(submit(f,{population:150},3,submitId)));
+  const selectAction=()=>settled(population.selectPreferred(other,{expectedVersion:1,expectedPreferred:{id:f.id,version:3}},ctx));
+  const first=firstOperation==='submission'?submitAction():selectAction();let second:ReturnType<typeof submitAction>|ReturnType<typeof selectAction>|undefined;
+  try{await deadline(locked.wait);second=firstOperation==='submission'?selectAction():submitAction();await deadline(waiting.wait);await blockedBy(waiter,holder);}
+  finally{held.release();await first;if(second)await second;}
+  const a=await first,b=await second!;expect(a.ok).toBe(true);expect(b.ok).toBe(true);
+  const response=firstOperation==='submission'?a:b;
+  if(response.ok)expect((response.value as Awaited<ReturnType<typeof submit>>).status).toBe(firstOperation==='submission'?201:409);
+  expect(await db.changeRequest.count({where:{entityId:f.id}})).toBe(firstOperation==='submission'?1:0);
+  expect(await db.auditLog.count({where:{requestId:submitId,entityType:'ChangeRequest'}})).toBe(firstOperation==='submission'?1:0);
+  expect(await db.auditLog.count({where:{requestId:selectId,entityType:'PopulationRecord',action:'UPDATE'}})).toBe(2);
+  expect(await db.populationRecord.findUniqueOrThrow({where:{id:f.id}})).toMatchObject({version:4,isPreferred:false});
+  expect(await db.populationRecord.findUniqueOrThrow({where:{id:other}})).toMatchObject({version:2,isPreferred:true});
+ },15000);
  it.each(['patch','delete','reject'] as const)('holds the submission lock against %s and commits both in order',async operation=>{
   const f=await fixture(),held=gate(),locked=gate(),waiting=gate();let holder=0,waiter=0,calls=0;
   const findUpdate=repository.findForUpdate.bind(repository),findDelete=repository.findForDelete.bind(repository);
@@ -148,4 +198,41 @@ describe('Submission and Population row-lock races',()=>{
   expect(await db.changeRequest.count({where:{entityId:f.id}})).toBe(0);expect(await db.auditLog.count({where:{requestId:submitRid}})).toBe(0);
   expect(await db.auditLog.count({where:{requestId:mutationRid,entityType:'PopulationRecord'}})).toBe(1);
  });
+});
+
+describe('Submission and parent deletion races',()=>{
+ it.each([['village','submission'],['village','deletion'],['source','submission'],['source','deletion']] as const)('%s deletion with %s first',async(kind,firstOperation)=>{
+  const f=await fixture(),held=gate(),locked=gate();let holder=0;
+  const {villageService}=await import('../../src/modules/villages/villages.service.js');
+  const {sourceRepository}=await import('../../src/modules/sources/sources.repository.js');
+  const {sourceService}=await import('../../src/modules/sources/sources.service.js');
+  const audit=await import('../../src/modules/audit/audit.service.js');
+  const originalAudit=audit.recordAudit.bind(audit),ensure=villageService.ensureExists.bind(villageService),findSource=sourceRepository.findById.bind(sourceRepository);
+  vi.spyOn(audit,'recordAudit').mockImplementation(async(input,client)=>{
+   const result=await originalAudit(input,client);
+   if(firstOperation==='deletion' && client && input.requestId===deleteId){holder=(await client.$queryRaw<Array<{pid:number}>>`SELECT pg_backend_pid() AS pid`)[0]!.pid;locked.release();await deadline(held.wait);}
+   return result;
+  });
+  vi.spyOn(villageService,'ensureExists').mockImplementation(async(id,client)=>{
+   await ensure(id,client);
+   if(kind==='village' && firstOperation==='submission' && client && id===f.villageId){holder=(await client.$queryRaw<Array<{pid:number}>>`SELECT pg_backend_pid() AS pid`)[0]!.pid;locked.release();await deadline(held.wait);}
+  });
+  vi.spyOn(sourceRepository,'findById').mockImplementation(async(id,client)=>{
+   const result=await findSource(id,client);
+   if(kind==='source' && firstOperation==='submission' && client && id===f.otherSourceId){holder=(await client.$queryRaw<Array<{pid:number}>>`SELECT pg_backend_pid() AS pid`)[0]!.pid;locked.release();await deadline(held.wait);}
+   return result;
+  });
+  const submitId=requestId(),deleteId=requestId();
+  const submitAction=()=>settled(Promise.resolve(submit(f,kind==='source'?{sourceId:f.otherSourceId}:{population:150},3,submitId)));
+  const deleteAction=()=>settled<unknown>(kind==='source'?sourceService.softDelete(f.otherSourceId,{expectedVersion:1},{actorId:f.adminId,role:'ADMIN',requestId:deleteId}):villageService.remove(f.villageId,{userId:f.adminId,role:'ADMIN',requestId:deleteId}));
+  const first=firstOperation==='submission'?submitAction():deleteAction();let second:ReturnType<typeof submitAction>|ReturnType<typeof deleteAction>|undefined;
+  try{await deadline(locked.wait);second=firstOperation==='submission'?deleteAction():submitAction();await blockedByAny(holder);}
+  finally{held.release();await first;if(second)await second;}
+  const a=await first,b=await second!;expect(a.ok).toBe(true);expect(b.ok).toBe(true);
+  const submitted=firstOperation==='submission'?a:b;
+  if(submitted.ok)expect((submitted.value as Awaited<ReturnType<typeof submit>>).status).toBe(firstOperation==='submission'?201:404);
+  expect(await db.changeRequest.count({where:{entityId:f.id}})).toBe(firstOperation==='submission'?1:0);
+  expect(await db.auditLog.count({where:{requestId:submitId,entityType:'ChangeRequest'}})).toBe(firstOperation==='submission'?1:0);
+  expect(await db.auditLog.count({where:{requestId:deleteId,action:'DELETE'}})).toBe(1);
+ },15000);
 });
