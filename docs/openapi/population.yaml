@@ -58,7 +58,13 @@ paths:
       summary: List population records for a village
       description: >-
         Returns active records for an active village, including records whose source is
-        soft-deleted and records of all verification statuses. Unknown query keys are
+        soft-deleted and records of all verification statuses. By default only preferred
+        records are returned; this changes the result for callers that previously omitted
+        isPreferred. No fallback is selected for a year without a preferred record.
+        Use includeAll=true for all eligible records, or isPreferred=true or false to
+        select that flag. includeAll=false preserves the default or explicit isPreferred
+        filter; includeAll=true combined with isPreferred returns 400. All filters are
+        combined and pagination totals count only matching records. Unknown query keys are
         ignored. A valid page beyond the last result returns an empty array. An
         effective pagination offset exceeding 2147483647 returns HTTP 400. The
         count and page are read from the same database snapshot.
@@ -88,6 +94,10 @@ paths:
         - name: isPreferred
           in: query
           schema: { type: string, enum: ["true", "false"] }
+        - name: includeAll
+          in: query
+          description: Return both preference values when true; cannot be combined with isPreferred when true.
+          schema: { type: string, enum: ["true", "false"] }
         - name: needsReview
           in: query
           schema: { type: string, enum: ["true", "false"] }
@@ -116,7 +126,7 @@ paths:
                   meta: { $ref: '#/components/schemas/PaginationMeta' }
               example:
                 data:
-                  - { id: '33333333-3333-4333-8333-333333333333', villageId: '22222222-2222-4222-8222-222222222222', population: 1000, referenceYear: 2020, referenceDate: null, sourceId: '11111111-1111-4111-8111-111111111111', isEstimate: true, isPreferred: false, needsReview: false, notes: Fictional example, verificationStatus: PENDING, version: 1, createdAt: '2026-01-01T10:00:00.000Z', updatedAt: '2026-01-01T10:00:00.000Z' }
+                  - { id: '33333333-3333-4333-8333-333333333333', villageId: '22222222-2222-4222-8222-222222222222', population: 1000, referenceYear: 2020, referenceDate: null, sourceId: '11111111-1111-4111-8111-111111111111', isEstimate: true, isPreferred: true, needsReview: false, notes: Fictional example, verificationStatus: PENDING, version: 1, createdAt: '2026-01-01T10:00:00.000Z', updatedAt: '2026-01-01T10:00:00.000Z' }
                 meta: { page: 1, limit: 20, total: 1, totalPages: 1, hasNextPage: false, hasPrevPage: false }
         '400': { $ref: '#/components/responses/ValidationError' }
         '404': { $ref: '#/components/responses/NotFound' }

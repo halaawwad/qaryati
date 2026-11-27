@@ -15,4 +15,14 @@ describe('population schemas', () => {
  });
  it.each([{referenceYear:''},{referenceYear:'2147483648'},{referenceYear:'-2147483649'},{referenceYear:'2000.5'},{sourceId:'bad'},{needsReview:'yes'},{page:'0'},{page:'2147483649',limit:'1'},{sort:'notes'}])('rejects %j', q => expect(listPopulationQuerySchema.safeParse(q).success).toBe(false));
  it('rejects invalid ids', () => expect(populationParamsSchema.safeParse({id:'bad'}).success).toBe(false));
+ it.each([
+  [{includeAll:'true'},{includeAll:true}], [{includeAll:'false',isPreferred:'true'},{includeAll:false,isPreferred:true}],
+  [{includeAll:'false',isPreferred:'false'},{includeAll:false,isPreferred:false}],
+  [{includeAll:'false',unknown:'ignored'},{includeAll:false}],
+ ])('parses preference query %j', (input,expected)=>expect(listPopulationQuerySchema.parse(input)).toEqual(expected));
+ it.each([{includeAll:'true',isPreferred:'true'},{includeAll:'true',isPreferred:'false'},{includeAll:'yes'},{includeAll:'TRUE'},{isPreferred:'1'}])('rejects conflicting or invalid preference query %j',input=>expect(listPopulationQuerySchema.safeParse(input).success).toBe(false));
+ it.each([
+  {includeAll:['true','false']}, {includeAll:['true','true']},
+  {isPreferred:['true','false']}, {isPreferred:['false','false']},
+ ])('rejects repeated preference values %j',input=>expect(listPopulationQuerySchema.safeParse(input).success).toBe(false));
 });

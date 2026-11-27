@@ -4,6 +4,15 @@ import { NotFoundError } from '../src/shared/errors.js';
 vi.mock('../src/shared/db.js', () => ({ prisma: {} }));
 vi.mock('../src/shared/cache.js', () => ({ redis: {} }));
 describe('population service', () => {
+ it.each([
+  [{},true], [{isPreferred:true},true], [{isPreferred:false},false], [{includeAll:true},undefined],
+  [{includeAll:false},true], [{includeAll:false,isPreferred:true},true], [{includeAll:false,isPreferred:false},false],
+ ] as const)('passes the effective preference filter for %j',async(query,expected)=>{
+  const repository={preferredTransaction:vi.fn(),transaction:vi.fn(),findLatestVerified:vi.fn(),create:vi.fn(),findForUpdate:vi.fn(),findForDelete:vi.fn(),lockPreferredGroup:vi.fn(),findPreferredSlot:vi.fn(),lockPreferredRows:vi.fn(),setPreferred:vi.fn(),review:vi.fn(),softDelete:vi.fn(),update:vi.fn(),findMany:vi.fn().mockResolvedValue({items:[],total:0}),findById:vi.fn()};
+  const villages={ensureExists:vi.fn().mockResolvedValue(undefined)};
+  await new PopulationService(repository,villages).list('v',{...query,referenceYear:2020,sourceId:'source',isEstimate:false,needsReview:true,verificationStatus:'REJECTED',page:2,limit:3,sort:'population',order:'asc'});
+  expect(repository.findMany).toHaveBeenCalledWith({villageId:'v',filters:{referenceYear:2020,sourceId:'source',isEstimate:false,isPreferred:expected,needsReview:true,verificationStatus:'REJECTED'},sort:{field:'population',order:'asc'},skip:3,take:3});
+ });
  it('passes filters and pagination and constructs metadata', async () => {
   const repository = {preferredTransaction:vi.fn(),transaction:vi.fn(),findLatestVerified:vi.fn(),create:vi.fn(),findForUpdate:vi.fn(),findForDelete:vi.fn(),lockPreferredGroup:vi.fn(),findPreferredSlot:vi.fn(),lockPreferredRows:vi.fn(),setPreferred:vi.fn(),review:vi.fn(),softDelete:vi.fn(),update:vi.fn(),findMany:vi.fn().mockResolvedValue({items:[{id:'x'}],total:21}),findById:vi.fn()}; const villages={ensureExists:vi.fn().mockResolvedValue(undefined)};
   const result=await new PopulationService(repository,villages).list('v',{page:2,limit:10,isEstimate:false});
