@@ -2,7 +2,7 @@
 
 `DELETE /api/v1/sources/:id` requires a Bearer access token with the ADMIN role.
 The ID must be a UUID. Send a JSON body containing only a positive integer
-`expectedVersion`, matching the version returned by Sources reads. This follows
+`expectedVersion` no greater than 2147483647, matching the version returned by Sources reads. This follows
 the PATCH precondition convention; clients cannot assign the next stored version.
 
 ```json
@@ -25,6 +25,7 @@ valid authentication, 403 for non-admin users, 404 NOT_FOUND for a source missin
 or already deleted at the initial lookup, and 409 CONFLICT for a stale version or
 a conditional update miss after that lookup (including a concurrent deletion).
 Repeated deletion returns 404, even if the repeated expected version is stale.
+Deletion at version 2147483647 returns 409 because its version cannot increment.
 
 The lookup, conditional soft-delete, and DELETE Audit insert share one Prisma
 transaction. Audit failure rejects the transaction. Audit snapshots explicitly

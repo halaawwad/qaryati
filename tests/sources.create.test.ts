@@ -40,12 +40,22 @@ beforeEach(() => {
   mocks.sourceCreate.mockResolvedValue(result);
   mocks.auditCreate.mockResolvedValue({ id: 'audit-id' });
 });
-function post(body: unknown = input, role = 'EDITOR') {
+function post(body: object = input, role = 'EDITOR') {
   const token = jwt.sign({ role }, secret, { subject: actorId, algorithm: 'HS256', expiresIn: '15m' });
   return request(app).post('/api/v1/sources').set('Authorization', `Bearer ${token}`).send(body);
 }
 
 describe('POST Sources', () => {
+  it('redacts query and fragment only in the CREATE audit snapshot', async () => {
+    const url='https://example.invalid/reference?token=synthetic-secret#synthetic-fragment';
+    mocks.sourceCreate.mockResolvedValueOnce({...result,url});
+    const response=await post({...input,url});
+    expect(response.status).toBe(201); expect(response.body.data.url).toBe(url);
+    expect(mocks.sourceCreate.mock.calls[0]![0].data.url).toBe(url);
+    const audit=mocks.auditCreate.mock.calls[0]![0].data;
+    expect(audit.after.url).toBe('https://example.invalid/reference');
+    expect(JSON.stringify(audit)).not.toMatch(/synthetic-secret|synthetic-fragment/);
+  });
   it.each(['EDITOR', 'REVIEWER', 'ADMIN'])('allows %s and returns 201 with selected data', async (role) => {
     const response = await post({ ...input, title: '  Reference  ' }, role).set('X-Request-Id', 'source-create-123');
     expect(response.status).toBe(201);

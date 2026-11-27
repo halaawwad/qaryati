@@ -1,8 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
-import type { Express } from 'express';
 import type { Prisma, PrismaClient } from '@prisma/client';
-import request from 'supertest';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { populationService as PopulationService } from '../../src/modules/population/population.service.js';
 import type { populationRepository as PopulationRepository } from '../../src/modules/population/population.repository.js';
@@ -16,7 +14,6 @@ let populationRepository: typeof PopulationRepository;
 let village: typeof VillageService;
 let villageRepository: typeof VillageRepository;
 let auditRepository: typeof AuditRepository;
-let app: Express;
 let verified = false;
 const ids = { users: new Set<string>(), governors: new Set<string>(), villages: new Set<string>(), sources: new Set<string>(), records: new Set<string>(), requests: new Set<string>() };
 
@@ -80,7 +77,7 @@ beforeAll(async () => {
   village = (await import('../../src/modules/villages/villages.service.js')).villageService;
   villageRepository = (await import('../../src/modules/villages/villages.repository.js')).villageRepository;
   auditRepository = (await import('../../src/modules/audit/audit.repository.js')).auditRepository;
-  app = (await import('../../src/app.js')).createApp();
+  (await import('../../src/app.js')).createApp();
  } catch {
   if (db) await db.$disconnect();
   throw new Error('Could not verify integration database identity or initialize test services');

@@ -75,6 +75,24 @@ See [`.env.example`](.env.example) for the full list. `.env` is gitignored, so n
 | `DATABASE_URL` / `REDIS_URL`                     | Connection URLs for local runs (Compose sets its own)     |
 | `APP_HOST_PORT` / `POSTGRES_HOST_PORT` / `REDIS_HOST_PORT` | Host ports published by docker-compose          |
 
+### Geographic integration
+
+The reviewed village geographic integration is disabled by default.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `GEO_ENABLED` | `false` | Enable geographic lookup |
+| `GEO_NOMINATIM_URL` | `https://nominatim.openstreetmap.org/search` | Nominatim search endpoint |
+| `GEO_USER_AGENT` | Empty | Identifying application name/version and contact |
+| `GEO_TIMEOUT_MS` | `5000` | Provider request timeout in milliseconds |
+| `GEO_CACHE_TTL_SECONDS` | `2592000` | Successful lookup cache lifetime (30 days) |
+| `GEO_NEGATIVE_TTL_SECONDS` | `300` | Negative lookup cache lifetime (5 minutes) |
+| `GEO_CANDIDATE_TTL_SECONDS` | `900` | Candidate reference lifetime (15 minutes) |
+| `GEO_CIRCUIT_THRESHOLD_PERCENT` | `50` | Circuit breaker failure threshold percentage |
+| `GEO_CIRCUIT_RESET_MS` | `30000` | Circuit breaker reset interval in milliseconds |
+
+Enabling geographic lookup requires a valid identifying User-Agent and explicit Redis coordination activation. Follow the [geographic integration guide](docs/geo-integration.md) for configuration, activation, provider usage policy, recovery procedures and testing instructions.
+
 ## Project structure
 
 ```
