@@ -25,7 +25,7 @@ function hasChanges(before: import('./population.repository.js').PopulationDetai
 export class PopulationService {
  constructor(private readonly repository: PopulationRepository = populationRepository, private readonly villages: Pick<typeof villageService, 'ensureExists'> = villageService) {}
  async validateChangeProposal(id: string, input: UpdatePopulationInput, client: Prisma.TransactionClient): Promise<void> {
-  const initial = await this.repository.findById(id);
+  const initial = await this.repository.findById(id, client);
   if (!initial) throw new NotFoundError('Population record not found');
   await this.villages.ensureExists(initial.villageId, client);
   let missingSource: NotFoundError | undefined;

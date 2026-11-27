@@ -9,7 +9,7 @@ vi.mock('../src/shared/cache.js',()=>({redis:{}}));
 const id='11111111-1111-4111-8111-111111111111',villageId='22222222-2222-4222-8222-222222222222',sourceId='33333333-3333-4333-8333-333333333333',otherSource='44444444-4444-4444-8444-444444444444',actor='55555555-5555-4555-8555-555555555555',requestId='change-request-test';
 const secret='test-secret-with-at-least-32-characters';
 const now=new Date('2026-01-01T00:00:00Z');
-const tx={$queryRaw:db.lock,populationRecord:{findFirst:db.locked,update:db.populationUpdate},source:{findFirst:db.source},changeRequest:{create:db.create},auditLog:{create:db.audit}};
+const tx={$queryRaw:db.lock,populationRecord:{findFirst:(args: {select: {createdById?: boolean}})=>args.select.createdById ? db.locked(args) : db.find(args),update:db.populationUpdate},source:{findFirst:db.source},changeRequest:{create:db.create},auditLog:{create:db.audit}};
 let row:Record<string,unknown>,app:Express;
 const body={entityType:'PopulationRecord',entityId:id,baseVersion:3,proposedChanges:{population:150},reason:' census '};
 beforeAll(async()=>{vi.stubEnv('NODE_ENV','test');vi.stubEnv('LOG_LEVEL','silent');vi.stubEnv('DATABASE_URL','postgresql://user:pass@localhost:5432/db');vi.stubEnv('REDIS_URL','redis://localhost:6379');vi.stubEnv('JWT_ACCESS_SECRET',secret);vi.stubEnv('RATE_LIMIT_ENABLED','false');app=(await import('../src/app.js')).createApp();});
@@ -90,14 +90,16 @@ describe('change request submission',()=>{
  });
  it('passes the same transaction client to validation, creation, and audit',async()=>{
   const {populationService}=await import('../src/modules/population/population.service.js');
+  const {populationRepository}=await import('../src/modules/population/population.repository.js');
   const {changeRequestsRepository}=await import('../src/modules/change-requests/change-requests.repository.js');
   const auditService=await import('../src/modules/audit/audit.service.js');
   const validate=vi.spyOn(populationService,'validateChangeProposal');
+  const lookup=vi.spyOn(populationRepository,'findById');
   const create=vi.spyOn(changeRequestsRepository,'create');
   const audit=vi.spyOn(auditService,'recordAudit');
   try {
    expect((await post(body,'EDITOR')).status).toBe(201);
-   expect(validate.mock.calls[0]![2]).toBe(tx); expect(create.mock.calls[0]![2]).toBe(tx); expect(audit.mock.calls[0]![1]).toBe(tx);
-  } finally {validate.mockRestore();create.mockRestore();audit.mockRestore();}
+   expect(validate.mock.calls[0]![2]).toBe(tx); expect(lookup.mock.calls[0]![1]).toBe(tx); expect(create.mock.calls[0]![2]).toBe(tx); expect(audit.mock.calls[0]![1]).toBe(tx);
+  } finally {validate.mockRestore();lookup.mockRestore();create.mockRestore();audit.mockRestore();}
  });
 });
