@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { PrismaClient } from '@prisma/client';
+import type { Prisma, PrismaClient } from '@prisma/client';
 import type { Express } from 'express';
 import jwt from 'jsonwebtoken';
 import request from 'supertest';
@@ -18,6 +18,10 @@ beforeAll(async()=>{
   const {PrismaClient}=await import('@prisma/client');db=new PrismaClient({log:[]});
   const identity=await db.$queryRaw<Array<{database:string;username:string}>>`SELECT current_database() AS database,current_user AS username`;
   if(identity.length!==1||identity[0]?.database!=='qaryati_local'||identity[0]?.username!=='qaryati_local')throw new Error();
+  const marker=process.env.QARYATI_DISPOSABLE_MARKER;
+  if(!marker||!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(marker))throw new Error('Disposable marker required');
+  const safety=await db.$queryRaw<Array<{marker:string}>>`SELECT marker::text AS marker FROM qaryati_test_safety.disposable_instance LIMIT 2`;
+  if(safety.length!==1||safety[0]?.marker.toLowerCase()!==marker.toLowerCase())throw new Error('Disposable marker mismatch');
   verified=true;vi.stubEnv('NODE_ENV','test');vi.stubEnv('LOG_LEVEL','silent');vi.stubEnv('RATE_LIMIT_ENABLED','false');vi.stubEnv('REDIS_URL','redis://127.0.0.1:6379');vi.stubEnv('JWT_ACCESS_SECRET',secret);
   vi.doMock('../../src/shared/db.js',()=>({prisma:db}));vi.doMock('../../src/shared/cache.js',()=>({redis:{}}));app=(await import('../../src/app.js')).createApp();
  } catch {if(db)await db.$disconnect();throw new Error('Could not verify integration database identity or initialize test services');}
@@ -49,6 +53,30 @@ function get(path:string,subject?:string,role?:string){let req=request(app).get(
 const endpoint='/api/v1/change-requests';
 async function snapshots(f:Awaited<ReturnType<typeof fixture>>){return {changes:await db.changeRequest.findMany({where:{id:{in:f.changeIds}},orderBy:{id:'asc'}}),population:await db.populationRecord.findUniqueOrThrow({where:{id:f.population}}),audits:await db.auditLog.findMany({where:{OR:[{entityType:'ChangeRequest',entityId:{in:f.changeIds}},{entityType:'PopulationRecord',entityId:f.population}]},orderBy:{id:'asc'}})};}
 describe('Change Request read HTTP with PostgreSQL',()=>{
+ it('uses one snapshot for count and page across a committed concurrent status change',async()=>{
+  const f=await fixture();let releaseCount!:()=>void,releasePage!:()=>void;
+  const countDone=new Promise<void>(resolve=>{releaseCount=resolve;}),pageGate=new Promise<void>(resolve=>{releasePage=resolve;});
+  const timeout=async<T>(promise:Promise<T>)=>{let timer:ReturnType<typeof setTimeout>|undefined;try{return await Promise.race([promise,new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error('Snapshot synchronization timeout')),5000);})]);}finally{if(timer)clearTimeout(timer);}};
+  const original=db.$transaction.bind(db);
+  const spy=vi.spyOn(db,'$transaction').mockImplementation(((callback:(tx:Prisma.TransactionClient)=>Promise<unknown>,options:unknown)=>original(async tx=>{
+   const proxy=new Proxy(tx,{get(target,key,receiver){
+    if(key!=='changeRequest')return Reflect.get(target,key,receiver);
+    return new Proxy(target.changeRequest,{get(delegate,method,delegateReceiver){
+     if(method==='count')return async(args:Prisma.ChangeRequestCountArgs)=>{const result=await delegate.count(args);releaseCount();return result;};
+     if(method==='findMany')return async(args:Prisma.ChangeRequestFindManyArgs)=>{await timeout(pageGate);return delegate.findMany(args);};
+     return Reflect.get(delegate,method,delegateReceiver);
+    }});
+   }});
+   return callback(proxy);
+  },options as {isolationLevel:Prisma.TransactionIsolationLevel})) as typeof db.$transaction);
+  const pending=Promise.resolve(get(`${endpoint}?status=PENDING`,f.admin,'ADMIN'));
+  try{
+   try{await timeout(countDone);await db.changeRequest.update({where:{id:f.changeIds[0]},data:{status:'REJECTED'}});}
+   finally{releasePage();}
+   const result=await timeout(pending);expect(result.status).toBe(200);expect(result.body.meta.total).toBe(2);expect(result.body.data).toHaveLength(2);expect(result.body.data.map((item:{id:string})=>item.id)).toContain(f.changeIds[0]);
+  }finally{releasePage();spy.mockRestore();}
+  const after=await get(`${endpoint}?status=PENDING`,f.admin,'ADMIN');expect(after.body.meta.total).toBe(1);
+ },15000);
  it('enforces ownership, filtered counts and indistinguishable detail 404s',async()=>{
   const f=await fixture(),before=await snapshots(f);
   expect((await get(endpoint)).status).toBe(401);expect((await get(`${endpoint}/${f.changeIds[0]}`)).status).toBe(401);
