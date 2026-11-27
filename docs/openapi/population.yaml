@@ -32,6 +32,7 @@ paths:
         content:
           application/json:
             schema: { $ref: '#/components/schemas/CreatePopulationRecord' }
+            example: { population: 1000, referenceYear: 2020, sourceId: '11111111-1111-4111-8111-111111111111', isEstimate: true, notes: Fictional example }
       responses:
         '201':
           description: Population record created.
@@ -42,11 +43,14 @@ paths:
                 required: [data]
                 properties:
                   data: { $ref: '#/components/schemas/PopulationRecord' }
+              example: &populationResponse
+                data: { id: '33333333-3333-4333-8333-333333333333', villageId: '22222222-2222-4222-8222-222222222222', population: 1000, referenceYear: 2020, referenceDate: null, sourceId: '11111111-1111-4111-8111-111111111111', isEstimate: true, isPreferred: false, needsReview: false, notes: Fictional example, verificationStatus: PENDING, version: 1, createdAt: '2026-01-01T10:00:00.000Z', updatedAt: '2026-01-01T10:00:00.000Z' }
         '400': { $ref: '#/components/responses/ValidationError' }
         '401': { $ref: '#/components/responses/Error' }
         '403': { $ref: '#/components/responses/Error' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Error' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
         '429': { $ref: '#/components/responses/Error' }
         '500': { $ref: '#/components/responses/Error' }
     get:
@@ -110,8 +114,13 @@ paths:
                     type: array
                     items: { $ref: '#/components/schemas/PopulationRecord' }
                   meta: { $ref: '#/components/schemas/PaginationMeta' }
+              example:
+                data:
+                  - { id: '33333333-3333-4333-8333-333333333333', villageId: '22222222-2222-4222-8222-222222222222', population: 1000, referenceYear: 2020, referenceDate: null, sourceId: '11111111-1111-4111-8111-111111111111', isEstimate: true, isPreferred: false, needsReview: false, notes: Fictional example, verificationStatus: PENDING, version: 1, createdAt: '2026-01-01T10:00:00.000Z', updatedAt: '2026-01-01T10:00:00.000Z' }
+                meta: { page: 1, limit: 20, total: 1, totalPages: 1, hasNextPage: false, hasPrevPage: false }
         '400': { $ref: '#/components/responses/ValidationError' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
         '429': { $ref: '#/components/responses/Error' }
         '500': { $ref: '#/components/responses/Error' }
   /api/v1/population-records/{id}:
@@ -152,11 +161,13 @@ paths:
                       id: { type: string, format: uuid }
                       version: { type: integer }
                       deletedAt: { type: string, format: date-time }
+              example:
+                data: { id: '33333333-3333-4333-8333-333333333333', version: 4, deletedAt: '2026-01-01T14:00:00.000Z' }
         '400': { $ref: '#/components/responses/ValidationError' }
         '401': { $ref: '#/components/responses/Error' }
         '403': { $ref: '#/components/responses/Error' }
         '404': { $ref: '#/components/responses/NotFound' }
-        '413': { $ref: '#/components/responses/Error' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
         '429': { $ref: '#/components/responses/Error' }
         '500': { $ref: '#/components/responses/Error' }
     patch:
@@ -186,6 +197,7 @@ paths:
         content:
           application/json:
             schema: { $ref: '#/components/schemas/UpdatePopulationRecord' }
+            example: { expectedVersion: 1, notes: Updated fictional example }
       responses:
         '200':
           description: Updated or unchanged population record.
@@ -196,11 +208,14 @@ paths:
                 required: [data]
                 properties:
                   data: { $ref: '#/components/schemas/PopulationRecord' }
-        '400': { $ref: '#/components/responses/ValidationError' }
+              example:
+                data: { id: '33333333-3333-4333-8333-333333333333', villageId: '22222222-2222-4222-8222-222222222222', population: 1000, referenceYear: 2020, referenceDate: null, sourceId: '11111111-1111-4111-8111-111111111111', isEstimate: true, isPreferred: false, needsReview: false, notes: Updated fictional example, verificationStatus: PENDING, version: 2, createdAt: '2026-01-01T10:00:00.000Z', updatedAt: '2026-01-01T11:00:00.000Z' }
+        '400': { $ref: '#/components/responses/UpdateValidationError' }
         '401': { $ref: '#/components/responses/Error' }
         '403': { $ref: '#/components/responses/Error' }
         '404': { $ref: '#/components/responses/NotFound' }
-        '409': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/VersionConflict' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
         '429': { $ref: '#/components/responses/Error' }
         '500': { $ref: '#/components/responses/Error' }
     get:
@@ -223,8 +238,10 @@ paths:
                 required: [data]
                 properties:
                   data: { $ref: '#/components/schemas/PopulationRecord' }
+              example: *populationResponse
         '400': { $ref: '#/components/responses/ValidationError' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
         '429': { $ref: '#/components/responses/Error' }
         '500': { $ref: '#/components/responses/Error' }
   /api/v1/population-records/{id}/verify:
@@ -258,6 +275,7 @@ paths:
         content:
           application/json:
             schema: { $ref: '#/components/schemas/ReviewPopulationRecord' }
+            example: { expectedVersion: 2 }
       responses: &reviewResponses
         '200':
           description: Updated or unchanged public Population record.
@@ -268,12 +286,17 @@ paths:
                 required: [data]
                 properties:
                   data: { $ref: '#/components/schemas/PopulationRecord' }
+              examples:
+                verified:
+                  summary: Verified record
+                  value:
+                    data: { id: '33333333-3333-4333-8333-333333333333', villageId: '22222222-2222-4222-8222-222222222222', population: 1000, referenceYear: 2020, referenceDate: null, sourceId: '11111111-1111-4111-8111-111111111111', isEstimate: true, isPreferred: false, needsReview: false, notes: Updated fictional example, verificationStatus: VERIFIED, version: 3, createdAt: '2026-01-01T10:00:00.000Z', updatedAt: '2026-01-01T12:00:00.000Z' }
         '400': { $ref: '#/components/responses/ValidationError' }
         '401': { $ref: '#/components/responses/Error' }
         '403': { $ref: '#/components/responses/Error' }
         '404': { $ref: '#/components/responses/NotFound' }
-        '409': { $ref: '#/components/responses/Error' }
-        '413': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/VersionConflict' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
         '429': { $ref: '#/components/responses/Error' }
         '500': { $ref: '#/components/responses/Error' }
   /api/v1/population-records/{id}/reject:
@@ -288,8 +311,32 @@ paths:
           in: path
           required: true
           schema: { type: string, format: uuid }
-      requestBody: *reviewBody
-      responses: *reviewResponses
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReviewPopulationRecord' }
+            example: { expectedVersion: 3 }
+      responses:
+        '200':
+          description: Rejected or unchanged public Population record.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/PopulationRecord' }
+              example:
+                data: { id: '33333333-3333-4333-8333-333333333333', villageId: '22222222-2222-4222-8222-222222222222', population: 1000, referenceYear: 2020, referenceDate: null, sourceId: '11111111-1111-4111-8111-111111111111', isEstimate: true, isPreferred: false, needsReview: false, notes: Updated fictional example, verificationStatus: REJECTED, version: 4, createdAt: '2026-01-01T10:00:00.000Z', updatedAt: '2026-01-01T13:00:00.000Z' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/VersionConflict' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '429': { $ref: '#/components/responses/Error' }
+        '500': { $ref: '#/components/responses/Error' }
 components:
   securitySchemes:
     bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
@@ -379,6 +426,27 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
+    UpdateValidationError:
+      description: Invalid path parameters or request body; the example omits editable fields.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          example:
+            error: { code: VALIDATION_ERROR, message: Request validation failed, details: [{ field: body, message: At least one editable field is required }], requestId: example-request-400 }
+    VersionConflict:
+      description: Conflict, including a stale expected version.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          example:
+            error: { code: CONFLICT, message: Population record version conflict, details: [], requestId: example-request-409 }
+    PayloadTooLarge:
+      description: JSON request body exceeds the global 1 MB limit.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          example:
+            error: { code: PAYLOAD_TOO_LARGE, message: Request body is too large, details: [], requestId: example-request-413 }
     NotFound:
       description: Village, source, or record is missing or soft-deleted, or the record belongs to a soft-deleted village.
       content:

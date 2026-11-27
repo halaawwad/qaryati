@@ -28,7 +28,12 @@ paths:
                 properties:
                   data: { type: array, items: { $ref: '#/components/schemas/Source' } }
                   meta: { $ref: '#/components/schemas/PaginationMeta' }
-        '400': { $ref: '#/components/responses/Error' }
+              example:
+                data:
+                  - { id: '11111111-1111-4111-8111-111111111111', title: Fictional census report, sourceType: CENSUS, author: null, publisher: null, year: 2020, url: 'https://example.org/report', citationText: null, verificationStatus: PENDING, version: 1, createdAt: '2026-01-01T10:00:00.000Z', updatedAt: '2026-01-01T10:00:00.000Z' }
+                meta: { page: 1, limit: 20, total: 1, totalPages: 1, hasNextPage: false, hasPrevPage: false }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
         '429': { $ref: '#/components/responses/Error' }
         '500': { $ref: '#/components/responses/Error' }
     post:
@@ -41,12 +46,13 @@ paths:
         content:
           application/json:
             schema: { $ref: '#/components/schemas/CreateSource' }
-            example: { title: Census report, sourceType: CENSUS, year: 2020, url: 'https://example.org/report' }
+            example: { title: Fictional census report, sourceType: CENSUS, year: 2020, url: 'https://example.org/report' }
       responses:
         '201': { $ref: '#/components/responses/Source' }
         '400': { $ref: '#/components/responses/Error' }
         '401': { $ref: '#/components/responses/Error' }
         '403': { $ref: '#/components/responses/Error' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
         '429': { $ref: '#/components/responses/Error' }
         '500': { $ref: '#/components/responses/Error' }
   /api/v1/sources/{id}:
@@ -61,6 +67,7 @@ paths:
         '200': { $ref: '#/components/responses/Source' }
         '400': { $ref: '#/components/responses/Error' }
         '404': { $ref: '#/components/responses/Error' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
         '429': { $ref: '#/components/responses/Error' }
         '500': { $ref: '#/components/responses/Error' }
     patch:
@@ -80,14 +87,25 @@ paths:
         content:
           application/json:
             schema: { $ref: '#/components/schemas/UpdateSource' }
-            example: { expectedVersion: 1, title: Updated census report }
+            example: { expectedVersion: 1, title: Updated fictional census report }
       responses:
-        '200': { $ref: '#/components/responses/Source' }
+        '200':
+          description: Updated or unchanged source.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/Source' }
+              example:
+                data: { id: '11111111-1111-4111-8111-111111111111', title: Updated fictional census report, sourceType: CENSUS, author: null, publisher: null, year: 2020, url: 'https://example.org/report', citationText: null, verificationStatus: PENDING, version: 2, createdAt: '2026-01-01T10:00:00.000Z', updatedAt: '2026-01-01T11:00:00.000Z' }
         '400': { $ref: '#/components/responses/Error' }
         '401': { $ref: '#/components/responses/Error' }
         '403': { $ref: '#/components/responses/Error' }
         '404': { $ref: '#/components/responses/Error' }
-        '409': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/VersionConflict' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
         '429': { $ref: '#/components/responses/Error' }
         '500': { $ref: '#/components/responses/Error' }
     delete:
@@ -104,7 +122,7 @@ paths:
         content:
           application/json:
             schema: { $ref: '#/components/schemas/DeleteSource' }
-            example: { expectedVersion: 1 }
+            example: { expectedVersion: 2 }
       responses:
         '200':
           description: Deletion receipt.
@@ -121,11 +139,14 @@ paths:
                       id: { type: string, format: uuid }
                       version: { type: integer }
                       deletedAt: { type: string, format: date-time }
+              example:
+                data: { id: '11111111-1111-4111-8111-111111111111', version: 3, deletedAt: '2026-01-01T12:00:00.000Z' }
         '400': { $ref: '#/components/responses/Error' }
         '401': { $ref: '#/components/responses/Error' }
         '403': { $ref: '#/components/responses/Error' }
         '404': { $ref: '#/components/responses/Error' }
-        '409': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/VersionConflict' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
         '429': { $ref: '#/components/responses/Error' }
         '500': { $ref: '#/components/responses/Error' }
 components:
@@ -141,29 +162,53 @@ components:
             required: [data]
             properties:
               data: { $ref: '#/components/schemas/Source' }
+          example:
+            data: { id: '11111111-1111-4111-8111-111111111111', title: Fictional census report, sourceType: CENSUS, author: null, publisher: null, year: 2020, url: 'https://example.org/report', citationText: null, verificationStatus: PENDING, version: 1, createdAt: '2026-01-01T10:00:00.000Z', updatedAt: '2026-01-01T10:00:00.000Z' }
+    PayloadTooLarge:
+      description: JSON request body exceeds the global 1 MB limit.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          example:
+            error: { code: PAYLOAD_TOO_LARGE, message: Request body is too large, details: [], requestId: example-request-413 }
+    VersionConflict:
+      description: Conflict, including a stale expected version.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          example:
+            error: { code: CONFLICT, message: Source version conflict, details: [], requestId: example-request-409 }
+    ValidationError:
+      description: Invalid request parameters or body.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          example:
+            error: { code: VALIDATION_ERROR, message: Request validation failed, details: [{ field: query.page, message: Pagination offset must not exceed 2147483647 }], requestId: example-request-400 }
     Error:
       description: Standard error envelope; codes include VALIDATION_ERROR, UNAUTHORIZED, FORBIDDEN, NOT_FOUND and CONFLICT.
       content:
         application/json:
-          schema:
-            type: object
-            required: [error]
-            properties:
-              error:
-                type: object
-                required: [code, message, details, requestId]
-                properties:
-                  code: { type: string }
-                  message: { type: string }
-                  requestId: { type: string }
-                  details:
-                    type: array
-                    items:
-                      type: object
-                      properties:
-                        field: { type: string }
-                        message: { type: string }
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
   schemas:
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, details, requestId]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            requestId: { type: string }
+            details:
+              type: array
+              items:
+                type: object
+                properties:
+                  field: { type: string }
+                  message: { type: string }
     SourceType: { type: string, enum: [CENSUS, BOOK, ARTICLE, GOVERNMENT, WEBSITE, ORAL, OTHER] }
     VerificationStatus: { type: string, enum: [PENDING, VERIFIED, REJECTED] }
     Version: { type: integer, minimum: 1, maximum: 2147483647 }
