@@ -3,7 +3,7 @@ import { validate } from '../../shared/middlewares/validate.js';
 import { authenticate } from '../../shared/middlewares/authenticate.js';
 import { requireRole } from '../../shared/middlewares/requireRole.js';
 import * as controller from './population.controller.js';
-import { createPopulationSchema, updatePopulationSchema, reviewPopulationSchema, listPopulationQuerySchema, populationParamsSchema, villagePopulationParamsSchema } from './population.schemas.js';
+import { createPopulationSchema, updatePopulationSchema, reviewPopulationSchema, selectPreferredSchema, listPopulationQuerySchema, populationParamsSchema, villagePopulationParamsSchema } from './population.schemas.js';
 export const villagePopulationRouter = Router({mergeParams: true});
 export const populationRouter = Router();
 villagePopulationRouter.post('/', authenticate, requireRole('EDITOR', 'REVIEWER', 'ADMIN'), validate({params: villagePopulationParamsSchema, body: createPopulationSchema}), controller.create);
@@ -13,3 +13,4 @@ populationRouter.patch('/:id', authenticate, requireRole('EDITOR', 'REVIEWER', '
 populationRouter.delete('/:id', authenticate, requireRole('ADMIN'), validate({params: populationParamsSchema}), controller.softDelete);
 populationRouter.post('/:id/verify', authenticate, requireRole('REVIEWER', 'ADMIN'), validate({params: populationParamsSchema, body: reviewPopulationSchema}), controller.verify);
 populationRouter.post('/:id/reject', authenticate, requireRole('REVIEWER', 'ADMIN'), validate({params: populationParamsSchema, body: reviewPopulationSchema}), controller.reject);
+populationRouter.post('/:id/preferred', authenticate, requireRole('REVIEWER', 'ADMIN'), validate({params: populationParamsSchema, body: selectPreferredSchema}), controller.selectPreferred);

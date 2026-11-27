@@ -227,6 +227,55 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '429': { $ref: '#/components/responses/Error' }
         '500': { $ref: '#/components/responses/Error' }
+  /api/v1/population-records/{id}/preferred:
+    post:
+      operationId: selectPreferredPopulationRecord
+      summary: Select the preferred population record for a village and year
+      description: >-
+        REVIEWER or ADMIN only. The caller supplies the target version and the
+        preferred slot it observed: null if empty, otherwise the current preferred
+        record ID and version. Only an active VERIFIED target is eligible. These
+        eligibility and slot-token rules are Population module policies, not explicit
+        team-guide requirements. A matching already-preferred selection is a no-op.
+        A replacement atomically clears the old preference, sets the target,
+        increments each changed version once, records updatedById and an UPDATE
+        audit for each. A deleted source is allowed; an inactive village is not.
+        Conflicts include stale target or slot versions, an ineligible target,
+        concurrent slot changes, a deleted preferred index occupant, and recognized
+        preferred-index or database concurrency conflicts. No selection is retried.
+        Version increments at the PostgreSQL integer maximum can overflow; the
+        exhaustion policy remains unresolved. The global JSON parser can return
+        400 or 413 before route-level authentication. READ defaults are unchanged.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SelectPreferredPopulationRecord' }
+      responses:
+        '200':
+          description: Selected or unchanged public Population record.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/PopulationRecord' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Error' }
+        '413': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+        '500': { $ref: '#/components/responses/Error' }
   /api/v1/population-records/{id}/verify:
     post:
       operationId: verifyPopulationRecord
@@ -294,6 +343,20 @@ components:
   securitySchemes:
     bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
   schemas:
+    SelectPreferredPopulationRecord:
+      type: object
+      additionalProperties: false
+      required: [expectedVersion, expectedPreferred]
+      properties:
+        expectedVersion: { type: integer, minimum: 1, maximum: 2147483647 }
+        expectedPreferred:
+          type: object
+          nullable: true
+          additionalProperties: false
+          required: [id, version]
+          properties:
+            id: { type: string, format: uuid }
+            version: { type: integer, minimum: 1, maximum: 2147483647 }
     ReviewPopulationRecord:
       type: object
       additionalProperties: false
