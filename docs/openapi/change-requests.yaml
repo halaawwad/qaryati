@@ -2,10 +2,13 @@ openapi: 3.0.3
 info:
   title: Qaryati API - Change Requests
   version: '1.0.0'
+servers:
+  - url: /
 paths:
   /api/v1/change-requests:
     get:
       summary: List change requests
+      operationId: listChangeRequests
       description: >-
         Authentication required. Editors see only their own requests and cannot
         supply requestedById; reviewers and administrators see all requests and
@@ -31,12 +34,19 @@ paths:
                 properties:
                   data: { type: array, items: { $ref: '#/components/schemas/ChangeRequest' } }
                   meta: { $ref: '#/components/schemas/PaginationMeta' }
-        '400': { $ref: '#/components/responses/Error' }
-        '401': { $ref: '#/components/responses/Error' }
-        '403': { $ref: '#/components/responses/Error' }
+              example:
+                data:
+                  - { id: '44444444-4444-4444-8444-444444444444', entityType: PopulationRecord, entityId: '33333333-3333-4333-8333-333333333333', baseVersion: 3, proposedChanges: { notes: Fictional revised note }, reason: Fictional correction, status: PENDING, requestedById: '11111111-1111-4111-8111-111111111111', reviewedById: null, reviewComment: null, createdAt: '2026-01-01T10:00:00.000Z', updatedAt: '2026-01-01T10:00:00.000Z', reviewedAt: null }
+                meta: { page: 1, limit: 20, total: 1, totalPages: 1, hasNextPage: false, hasPrevPage: false }
+        '400': { $ref: '#/components/responses/ListValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/Error' }
     post:
       summary: Submit a Population change request
+      operationId: submitPopulationChangeRequest
       description: >-
         Only an authenticated EDITOR may submit. The active Population record must
         be VERIFIED and baseVersion must match. The proposal must make an actual
@@ -56,6 +66,7 @@ paths:
         content:
           application/json:
             schema: { $ref: '#/components/schemas/Submission' }
+            example: { entityType: PopulationRecord, entityId: '33333333-3333-4333-8333-333333333333', baseVersion: 3, proposedChanges: { notes: Fictional revised note }, reason: Fictional correction }
       responses:
         '201':
           description: Pending change request created.
@@ -66,15 +77,20 @@ paths:
                 required: [data]
                 properties:
                   data: { $ref: '#/components/schemas/ChangeRequest' }
+              example: &pendingResponse
+                data: { id: '44444444-4444-4444-8444-444444444444', entityType: PopulationRecord, entityId: '33333333-3333-4333-8333-333333333333', baseVersion: 3, proposedChanges: { notes: Fictional revised note }, reason: Fictional correction, status: PENDING, requestedById: '11111111-1111-4111-8111-111111111111', reviewedById: null, reviewComment: null, createdAt: '2026-01-01T10:00:00.000Z', updatedAt: '2026-01-01T10:00:00.000Z', reviewedAt: null }
         '400': { $ref: '#/components/responses/Error' }
-        '401': { $ref: '#/components/responses/Error' }
-        '403': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/Error' }
-        '409': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/PopulationVersionConflict' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/Error' }
   /api/v1/change-requests/{id}/reject:
     post:
       summary: Reject a pending change request
+      operationId: rejectChangeRequest
       description: >-
         REVIEWER or ADMIN only. Only a PENDING request can be rejected; repeated
         rejection and rejection of an approved request return 409. The reviewer
@@ -95,6 +111,7 @@ paths:
               required: [reviewComment]
               properties:
                 reviewComment: { type: string, minLength: 1, maxLength: 5000, description: Trimmed and must not be blank. }
+            example: { reviewComment: Fictional review comment }
       responses:
         '200':
           description: Rejected change request.
@@ -105,15 +122,20 @@ paths:
                 required: [data]
                 properties:
                   data: { $ref: '#/components/schemas/ChangeRequest' }
+              example:
+                data: { id: '44444444-4444-4444-8444-444444444444', entityType: PopulationRecord, entityId: '33333333-3333-4333-8333-333333333333', baseVersion: 3, proposedChanges: { notes: Fictional revised note }, reason: Fictional correction, status: REJECTED, requestedById: '11111111-1111-4111-8111-111111111111', reviewedById: '22222222-2222-4222-8222-222222222222', reviewComment: Fictional review comment, createdAt: '2026-01-01T10:00:00.000Z', updatedAt: '2026-01-01T11:00:00.000Z', reviewedAt: '2026-01-01T11:00:00.000Z' }
         '400': { $ref: '#/components/responses/Error' }
-        '401': { $ref: '#/components/responses/Error' }
-        '403': { $ref: '#/components/responses/Error' }
-        '404': { $ref: '#/components/responses/Error' }
-        '409': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ChangeRequestNotFound' }
+        '409': { $ref: '#/components/responses/RequestNotPending' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/Error' }
   /api/v1/change-requests/{id}:
     get:
       summary: Get a change request
+      operationId: getChangeRequest
       description: >-
         Authentication required. Editors can read only their own requests; other
         requests and missing IDs both return 404. Reviewers and administrators
@@ -131,10 +153,13 @@ paths:
                 required: [data]
                 properties:
                   data: { $ref: '#/components/schemas/ChangeRequest' }
+              example: *pendingResponse
         '400': { $ref: '#/components/responses/Error' }
-        '401': { $ref: '#/components/responses/Error' }
-        '403': { $ref: '#/components/responses/Error' }
-        '404': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ChangeRequestNotFound' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/Error' }
 components:
   responses:
@@ -145,27 +170,84 @@ components:
         ineligible, concurrently changed, or version-exhausted target.
       content:
         application/json:
-          schema:
-            type: object
-            required: [error]
-            properties:
-              error:
-                type: object
-                required: [code, message, details]
-                properties:
-                  code: { type: string }
-                  message: { type: string }
-                  requestId: { type: string }
-                  details:
-                    type: array
-                    items:
-                      type: object
-                      properties:
-                        field: { type: string }
-                        message: { type: string }
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    ListValidationError:
+      description: Invalid list query parameters.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          example:
+            error: { code: VALIDATION_ERROR, message: Request validation failed, details: [{ field: query.page, message: Pagination offset must not exceed 2147483647 }], requestId: example-request-400 }
+    Unauthorized:
+      description: Authentication is required.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          example:
+            error: { code: UNAUTHORIZED, message: Authentication required, details: [], requestId: example-request-401 }
+    Forbidden:
+      description: The authenticated role or requested filter is not permitted.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          example:
+            error: { code: FORBIDDEN, message: You do not have permission to perform this action, details: [], requestId: example-request-403 }
+    ChangeRequestNotFound:
+      description: The request is missing or not visible to this editor.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          example:
+            error: { code: NOT_FOUND, message: Change request not found, details: [], requestId: example-request-404 }
+    PopulationVersionConflict:
+      description: Conflict, including a stale Population base version.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          example:
+            error: { code: CONFLICT, message: Population record version conflict, details: [], requestId: example-request-409 }
+    RequestNotPending:
+      description: The Change Request is not pending or changed during review.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          example:
+            error: { code: CONFLICT, message: Change request is not pending, details: [], requestId: example-request-409 }
+    PayloadTooLarge:
+      description: The global JSON parser rejected a body larger than 1 MB, before route authentication.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          example:
+            error: { code: PAYLOAD_TOO_LARGE, message: Request body is too large, details: [], requestId: example-request-413 }
+    RateLimited:
+      description: The global rate limiter rejected the request.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          example:
+            error: { code: TOO_MANY_REQUESTS, message: 'Too many requests; please try again later', details: [], requestId: example-request-429 }
   securitySchemes:
     bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
   schemas:
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, details, requestId]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            requestId: { type: string }
+            details:
+              type: array
+              items:
+                type: object
+                properties:
+                  field: { type: string }
+                  message: { type: string }
     PaginationMeta:
       type: object
       required: [page, limit, total, totalPages, hasNextPage, hasPrevPage]
