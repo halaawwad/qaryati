@@ -109,7 +109,7 @@ describe('Preferred selection HTTP and parent validation',()=>{
   expect(await db.populationRecord.findUniqueOrThrow({where:{id:f.otherId}})).toMatchObject({isPreferred:true,version:2});
   expect(await db.auditLog.count({where:{requestId:rid}})).toBe(2);
  }));
- it('returns the unified HTTP 409 envelope for a real preferred-index race',async()=>{
+ it('selects after a year move clears preference during the guarded write',async()=>{
   await safeTest(async()=>{
    const f=await prepare();await db.populationRecord.update({where:{id:f.id},data:{referenceYear:2019}});
    const held=gate(),arrived=gate(),rid=requestId(),patchCtx=context(f.actorId);
@@ -120,10 +120,10 @@ describe('Preferred selection HTTP and parent validation',()=>{
    try{await Promise.race([arrived.wait,delay(4000).then(()=>{throw new Error('HTTP selection did not reach update');})]);await population.update(f.id,{expectedVersion:3,referenceYear:2020},patchCtx);}
    finally{held.release();}
    const result=await response;expect(result.ok).toBe(true);
-   if(result.ok){expect(result.value.status).toBe(409);expect(result.value.headers['x-request-id']).toBe(rid);expect(result.value.body).toMatchObject({error:{code:'CONFLICT',requestId:rid,details:[]}});}
-   expect(await db.populationRecord.findUniqueOrThrow({where:{id:f.id}})).toMatchObject({isPreferred:true,referenceYear:2020,version:4});
-   expect(await db.populationRecord.findUniqueOrThrow({where:{id:f.otherId}})).toMatchObject({isPreferred:false,version:1});
-   expect(await db.auditLog.count({where:{requestId:rid}})).toBe(0);
+   if(result.ok){expect(result.value.status).toBe(200);expect(result.value.headers['x-request-id']).toBe(rid);expect(result.value.body.data).toMatchObject({id:f.otherId,isPreferred:true});}
+   expect(await db.populationRecord.findUniqueOrThrow({where:{id:f.id}})).toMatchObject({isPreferred:false,referenceYear:2020,version:4});
+   expect(await db.populationRecord.findUniqueOrThrow({where:{id:f.otherId}})).toMatchObject({isPreferred:true,version:2});
+   expect(await db.auditLog.count({where:{requestId:rid}})).toBe(1);
   })();
  },15000);
 });
@@ -204,7 +204,7 @@ async function raceOperation(operation:RaceOperation,first:'selection'|'other') 
 }
 
 describe('Preferred selection row-lock races',()=>{
- it('detects a preferred record PATCHed into an empty slot before the first slot read',async()=>{
+ it('selects an empty slot after a moved record loses preference',async()=>{
   await safeTest(async()=>{
    const f=await prepare();await db.populationRecord.update({where:{id:f.id},data:{referenceYear:2019}});
    const held=gate(),locked=gate(),original=populationRepository.lockPreferredGroup.bind(populationRepository);
@@ -213,35 +213,35 @@ describe('Preferred selection row-lock races',()=>{
    const choosing=settled(population.selectPreferred(f.otherId,selection(f.otherId,1,null),selectCtx));
    try{await locked.wait;await population.update(f.id,{expectedVersion:3,referenceYear:2020},patchCtx);}
    finally{held.release();}
-   const result=await choosing;expect(result.ok).toBe(false);if(!result.ok)expect(errorCode(result.error)).toBe('CONFLICT');
-   expect(await db.populationRecord.findUniqueOrThrow({where:{id:f.id}})).toMatchObject({isPreferred:true,referenceYear:2020,version:4});
-   expect(await db.populationRecord.findUniqueOrThrow({where:{id:f.otherId}})).toMatchObject({isPreferred:false,version:1});
-   expect(await db.auditLog.count({where:{requestId:selectCtx.requestId}})).toBe(0);expect(await db.auditLog.count({where:{requestId:patchCtx.requestId}})).toBe(1);
+   const result=await choosing;expect(result.ok).toBe(true);
+   expect(await db.populationRecord.findUniqueOrThrow({where:{id:f.id}})).toMatchObject({isPreferred:false,referenceYear:2020,version:4});
+   expect(await db.populationRecord.findUniqueOrThrow({where:{id:f.otherId}})).toMatchObject({isPreferred:true,version:2});
+   expect(await db.auditLog.count({where:{requestId:selectCtx.requestId}})).toBe(1);expect(await db.auditLog.count({where:{requestId:patchCtx.requestId}})).toBe(1);
   })();
  },15000);
- it('lets the index reject a PATCH moving a preferred row into a slot claimed by a selector',async()=>{
-  await safeTest(async()=>{
-   const f=await prepare();await db.populationRecord.update({where:{id:f.id},data:{referenceYear:2019}});
-   const held=gate(),written=gate(),waiting=gate();let holder=0,waiter=0;
-   const write=populationRepository.setPreferred.bind(populationRepository),patchWrite=populationRepository.update.bind(populationRepository);
-   vi.spyOn(populationRepository,'setPreferred').mockImplementation(async(...args)=>{const result=await write(...args);holder=await backend(args[4]);written.release();await held.wait;return result;});
-   vi.spyOn(populationRepository,'update').mockImplementation(async(...args)=>{waiter=await backend(args[3]);waiting.release();try{return await patchWrite(...args);}catch(error){const e=error as {constructor:{name:string};code?:string;meta?:{modelName?:unknown;target?:unknown;code?:unknown}};console.log('PATCH race error metadata',JSON.stringify({class:e.constructor.name,code:e.code,modelName:e.meta?.modelName,target:e.meta?.target,sqlstate:e.meta?.code}));throw error;}});
-   const selectCtx=context(f.otherActor),patchId=requestId();
-   const token=jwt.sign({role:'ADMIN'},'population-integration-test-secret-at-least-32-characters',{subject:f.actorId});
-   const before=await db.populationRecord.findUniqueOrThrow({where:{id:f.id}});
-   const choosing=settled(population.selectPreferred(f.otherId,selection(f.otherId,1,null),selectCtx));let patching:ReturnType<typeof settled>|undefined;
-   try{
-    await Promise.race([written.wait,delay(4000).then(()=>{throw new Error('selection write timeout');})]);
-    patching=settled(Promise.resolve(request(app).patch(`/api/v1/population-records/${f.id}`).set('Authorization',`Bearer ${token}`).set('X-Request-Id',patchId).send({expectedVersion:3,referenceYear:2020})));
-    await Promise.race([waiting.wait,delay(4000).then(()=>{throw new Error('PATCH write timeout');})]);await blockedBy(waiter,holder);
-   }finally{held.release();await choosing;if(patching)await patching;}
-   expect((await choosing).ok).toBe(true);const result=await patching!;expect(result.ok).toBe(true);
-   if(result.ok){const response=result.value as request.Response;console.log('PATCH race HTTP response',JSON.stringify({status:response.status,code:response.body.error?.code,requestId:response.body.error?.requestId}));expect(response.status).toBe(409);expect(response.headers['x-request-id']).toBe(patchId);expect(response.body.error).toMatchObject({code:'CONFLICT',requestId:patchId,details:[]});}
-   expect(await db.populationRecord.findUniqueOrThrow({where:{id:f.id}})).toEqual(before);
-   expect(await db.populationRecord.findUniqueOrThrow({where:{id:f.otherId}})).toMatchObject({isPreferred:true,referenceYear:2020,version:2});
-   expect(await db.auditLog.count({where:{requestId:selectCtx.requestId}})).toBe(1);expect(await db.auditLog.count({where:{requestId:patchId}})).toBe(0);
-  })();
- },15000);
+ it('moves a preferred record into an occupied year without replacing the selection',safeTest(async()=>{
+  const f=await prepare();await db.populationRecord.update({where:{id:f.id},data:{referenceYear:2019,verificationStatus:'VERIFIED',verifiedById:f.actorId,verifiedAt:new Date('2021-01-01T00:00:00Z')}});
+  await population.selectPreferred(f.otherId,selection(f.otherId,1,null),context(f.otherActor));
+  const ctx=context(f.actorId);const moved=await population.update(f.id,{expectedVersion:3,referenceYear:2020},ctx);
+  expect(moved).toMatchObject({isPreferred:false,referenceYear:2020,verificationStatus:'VERIFIED',version:4});
+  expect(await db.populationRecord.findUniqueOrThrow({where:{id:f.id}})).toMatchObject({verifiedById:f.actorId,verifiedAt:new Date('2021-01-01T00:00:00Z')});
+  expect(await db.populationRecord.findUniqueOrThrow({where:{id:f.otherId}})).toMatchObject({isPreferred:true,version:2});
+  expect(await db.auditLog.findFirstOrThrow({where:{requestId:ctx.requestId}})).toMatchObject({before:{isPreferred:true,referenceYear:2019},after:{isPreferred:false,referenceYear:2020}});
+ }));
+ it('clears preference on a year move, keeps alternatives, and exposes them only with includeAll',safeTest(async()=>{
+  const f=await prepare(),ctx=context(f.actorId);const moved=await population.update(f.id,{expectedVersion:3,referenceYear:2019},ctx);
+  expect(moved).toMatchObject({referenceYear:2019,isPreferred:false,version:4});
+  expect((await population.list(f.villageId,{})).items).toHaveLength(0);
+  expect((await population.list(f.villageId,{includeAll:true})).items.map(x=>x.id)).toEqual(expect.arrayContaining([f.id,f.otherId]));
+  expect(await db.auditLog.findFirstOrThrow({where:{requestId:ctx.requestId}})).toMatchObject({before:{isPreferred:true,referenceYear:2020},after:{isPreferred:false,referenceYear:2019}});
+ }));
+ it('preserves the business key conflict and rolls back a year move',safeTest(async()=>{
+  const f=await prepare();await db.populationRecord.update({where:{id:f.id},data:{referenceYear:2019}});
+  const id=randomUUID();ids.records.add(id);await db.populationRecord.create({data:{id,villageId:f.villageId,sourceId:f.sourceId,referenceYear:2020,population:3}});
+  const before=await db.populationRecord.findUniqueOrThrow({where:{id:f.id}}),ctx=context(f.actorId);
+  await expect(population.update(f.id,{expectedVersion:3,referenceYear:2020},ctx)).rejects.toMatchObject({code:'CONFLICT'});
+  expect(await db.populationRecord.findUniqueOrThrow({where:{id:f.id}})).toEqual(before);expect(await db.auditLog.count({where:{requestId:ctx.requestId}})).toBe(0);
+ }));
  it.each(['selection','village'] as const)('observes parent lock with %s first',async first=>{
   await safeTest(async()=>{
    const f=await prepare(),held=gate(),locked=gate(),waiting=gate();let holder=0,waiter=0;
@@ -354,6 +354,33 @@ describe('Preferred selection row-lock races',()=>{
 });
 
 describe('Population preferred selection with PostgreSQL',()=>{
+ it.each(['target','previous'] as const)('leaves both rows and audits untouched when %s is exhausted',async which=>safeTest(async()=>{
+  const f=await prepare(),ctx=context(f.actorId),max=2147483647;
+  await db.populationRecord.update({where:{id:which==='target'?f.otherId:f.id},data:{version:max}});
+  const before=await db.populationRecord.findMany({where:{id:{in:[f.id,f.otherId]}},orderBy:{id:'asc'}});
+  await expect(population.selectPreferred(f.otherId,{expectedVersion:which==='target'?max:1,expectedPreferred:{id:f.id,version:which==='previous'?max:3}},ctx)).rejects.toMatchObject({code:'CONFLICT'});
+  expect(await db.populationRecord.findMany({where:{id:{in:[f.id,f.otherId]}},orderBy:{id:'asc'}})).toEqual(before);
+  expect(await db.auditLog.count({where:{requestId:ctx.requestId}})).toBe(0);
+ })());
+ it('guards PATCH and review at maximum, permits no-ops, last increment and unversioned delete',safeTest(async()=>{
+  const f=await prepare(),max=2147483647,ctx=context(f.actorId);
+  await db.populationRecord.update({where:{id:f.otherId},data:{version:max,needsReview:false}});
+  const before=await db.populationRecord.findUniqueOrThrow({where:{id:f.otherId}});
+  await expect(population.update(f.otherId,{expectedVersion:max,notes:'changed'},ctx)).rejects.toMatchObject({code:'CONFLICT'});
+  expect((await population.update(f.otherId,{expectedVersion:max,population:before.population},ctx)).version).toBe(max);
+  await expect(population.review(f.otherId,{expectedVersion:max},'REJECTED',ctx)).rejects.toMatchObject({code:'CONFLICT'});
+  expect((await population.review(f.otherId,{expectedVersion:max},'VERIFIED',ctx)).version).toBe(max);
+  expect(await db.populationRecord.findUniqueOrThrow({where:{id:f.otherId}})).toEqual(before);
+  expect(await db.auditLog.count({where:{requestId:ctx.requestId}})).toBe(0);
+  await db.populationRecord.update({where:{id:f.otherId},data:{verificationStatus:'PENDING'}});
+  await expect(population.review(f.otherId,{expectedVersion:max},'VERIFIED',ctx)).rejects.toMatchObject({code:'CONFLICT'});
+  expect(await db.auditLog.count({where:{requestId:ctx.requestId}})).toBe(0);
+  await db.populationRecord.update({where:{id:f.otherId},data:{version:max-1,verificationStatus:'PENDING'}});
+  expect((await population.review(f.otherId,{expectedVersion:max-1},'VERIFIED',ctx)).version).toBe(max);
+  expect(await db.auditLog.count({where:{requestId:ctx.requestId}})).toBe(1);
+  expect((await population.softDelete(f.otherId,ctx)).version).toBe(max);
+  expect(await db.auditLog.count({where:{requestId:ctx.requestId}})).toBe(2);
+ }));
  it('replaces a legacy pending preferred record, preserving provenance and auditing both changes',safeTest(async()=>{
   const f=await prepare(), ctx=context(f.otherActor);
   const before=await db.populationRecord.findMany({where:{id:{in:[f.id,f.otherId]}},orderBy:{id:'asc'}});
@@ -400,7 +427,7 @@ describe('Population preferred selection with PostgreSQL',()=>{
    expect(await db.auditLog.count({where:{requestId:ctx.requestId}})).toBe(0);
   })();
  });
- it('captures the real partial-index conflict when PATCH fills an empty slot after the final read',async()=>{
+ it('selects after a concurrent year change clears the old preference',async()=>{
   await safeTest(async()=>{
    const f=await prepare();await db.populationRecord.update({where:{id:f.id},data:{referenceYear:2019}});
    const held=gate(),arrived=gate();let captured:unknown;
@@ -419,9 +446,9 @@ describe('Population preferred selection with PostgreSQL',()=>{
     const e=captured as {constructor:{name:string};code?:string;meta?:{modelName?:unknown;target?:unknown;code?:unknown}};
     console.log('Preferred write error metadata',JSON.stringify({class:e.constructor.name,code:e.code,modelName:e.meta?.modelName,target:e.meta?.target,sqlstate:e.meta?.code}));
    }
-   expect(result.ok).toBe(false);if(!result.ok)expect(errorCode(result.error)).toBe('CONFLICT');
+   expect(result.ok).toBe(true);
    expect(await db.populationRecord.count({where:{villageId:f.villageId,referenceYear:2020,isPreferred:true}})).toBe(1);
-   expect(await db.auditLog.count({where:{requestId:selectionCtx.requestId}})).toBe(0);
+   expect(await db.auditLog.count({where:{requestId:selectionCtx.requestId}})).toBe(1);
   })();
  },15000);
  it('executes preferred transactions at READ COMMITTED',safeTest(async()=>{

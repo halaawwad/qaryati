@@ -38,6 +38,18 @@ beforeEach(()=>{
 const service=()=>new PopulationService(repo,villages);
 const input=()=>({expectedVersion:4,expectedPreferred:{id:oldId,version:7}});
 describe('Population preferred selection',()=>{
+ it.each(['target','previous'] as const)('rejects exhausted %s before either write or audit',async which=>{
+  if(which==='target') target.version=2147483647; else previous.version=2147483647;
+  await expect(service().selectPreferred(id,{expectedVersion:target.version,expectedPreferred:{id:oldId,version:previous.version}},context)).rejects.toMatchObject({statusCode:409,code:'CONFLICT'});
+  expect(repo.setPreferred).not.toHaveBeenCalled(); expect(audit).not.toHaveBeenCalled();
+ });
+ it('allows an already preferred maximum-version no-op and rejects stale tokens first',async()=>{
+  target.version=2147483647; target.isPreferred=true;
+  repo.findPreferredSlot.mockImplementation(async()=>({...target})); repo.lockPreferredRows.mockImplementation(async()=>[{...target}]);
+  await expect(service().selectPreferred(id,{expectedVersion:2147483646,expectedPreferred:{id,version:target.version}},context)).rejects.toMatchObject({message:'Population record version conflict'});
+  expect(await service().selectPreferred(id,{expectedVersion:target.version,expectedPreferred:{id,version:target.version}},context)).toMatchObject({version:target.version,isPreferred:true});
+  expect(repo.setPreferred).not.toHaveBeenCalled(); expect(audit).not.toHaveBeenCalled();
+ });
  it('validates both strict body levels and required nullable slot',()=>{
   for(const body of [{},{expectedVersion:4},{expectedVersion:0,expectedPreferred:null},{expectedVersion:2147483648,expectedPreferred:null},{expectedVersion:4,expectedPreferred:{id:oldId,version:0}},{expectedVersion:4,expectedPreferred:{id:'bad',version:7}},{expectedVersion:4,expectedPreferred:{id:oldId,version:7,extra:true}},{expectedVersion:4,expectedPreferred:null,extra:true}]) expect(selectPreferredSchema.safeParse(body).success).toBe(false);
   expect(selectPreferredSchema.safeParse({expectedVersion:1,expectedPreferred:null}).success).toBe(true);

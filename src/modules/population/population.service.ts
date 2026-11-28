@@ -12,6 +12,9 @@ function snapshot(item: import('./population.repository.js').PopulationDetails) 
 function anomalous(population: number, baseline: {population: number} | null): boolean {
  return baseline !== null && (!Number.isSafeInteger(baseline.population) || baseline.population <= 0 || Math.abs(population - baseline.population) * 2 > baseline.population);
 }
+function ensureVersionCapacity(version: number): void {
+ if (version >= 2147483647) throw new ConflictError('Population record version exhausted');
+}
 export class PopulationService {
  constructor(private readonly repository: PopulationRepository = populationRepository, private readonly villages: Pick<typeof villageService, 'ensureExists'> = villageService) {}
  async selectPreferred(id: string, input: SelectPreferredInput, context: PopulationCreateContext & {role: Role}) {
@@ -44,6 +47,8 @@ export class PopulationService {
      const {deletedAt: _deletedAt, ...record} = target;
      return publicRecord(record);
     }
+    ensureVersionCapacity(target.version);
+    if (previous) ensureVersionCapacity(previous.version);
     const auditSnapshot = (record: import('./population.repository.js').PopulationSnapshot) => ({...snapshot(record),createdById:record.createdById,updatedById:record.updatedById,verifiedById:record.verifiedById,verifiedAt:record.verifiedAt?.toISOString() ?? null});
     const demoted = previous ? await this.repository.setPreferred(previous.id, previous.version, true, context.actorId, client) : undefined;
     const selected = await this.repository.setPreferred(target.id, target.version, false, context.actorId, client);
@@ -69,7 +74,8 @@ export class PopulationService {
     const {createdById: _createdById, updatedById: _updatedById, verifiedById: _verifiedById, verifiedAt: _verifiedAt, ...details} = item;
     return details;
    };
-   if (current.verificationStatus === target) return publicRecord(current);
+   if (current.verificationStatus === target && (target !== 'VERIFIED' || !current.needsReview)) return publicRecord(current);
+   ensureVersionCapacity(current.version);
    const item = await this.repository.review(id, input.expectedVersion, current.verificationStatus, target, context.actorId, client);
    const auditSnapshot = (record: typeof current) => ({...snapshot(record), createdById:record.createdById, updatedById:record.updatedById, verifiedById:record.verifiedById, verifiedAt:record.verifiedAt?.toISOString() ?? null});
    await recordAudit({entityType:'PopulationRecord', entityId:id, action:target === 'VERIFIED' ? 'VERIFY' : 'REJECT', actorId:context.actorId, requestId:context.requestId, before:auditSnapshot(current), after:auditSnapshot(item)}, client);
@@ -117,12 +123,14 @@ export class PopulationService {
     return value !== before[key as keyof typeof before];
    });
    if (!changed) return before;
+   ensureVersionCapacity(current.version);
    let needsReview: boolean | undefined;
    if (input.population !== undefined && input.population !== current.population) {
     const baseline = await this.repository.findLatestVerified(current.villageId, client, id);
     needsReview = current.needsReview || anomalous(input.population, baseline);
    }
-   const item = await this.repository.update(id, input, context.actorId, client, needsReview);
+   const yearChanged = input.referenceYear !== undefined && input.referenceYear !== current.referenceYear;
+   const item = await this.repository.update(id, input, context.actorId, client, needsReview, yearChanged);
    await recordAudit({entityType:'PopulationRecord', entityId:id, action:'UPDATE', actorId:context.actorId, requestId:context.requestId, before:snapshot(before), after:snapshot(item)}, client);
    return item;
   });
@@ -145,7 +153,8 @@ export class PopulationService {
  async list(villageId: string, query: ListPopulationQuery) {
   await this.villages.ensureExists(villageId);
   const pagination = parsePagination(query);
-  const {referenceYear, sourceId, isEstimate, isPreferred, needsReview, verificationStatus} = query;
+  const {referenceYear, sourceId, isEstimate, needsReview, verificationStatus} = query;
+  const isPreferred = query.includeAll ? undefined : query.isPreferred ?? true;
   const result = await this.repository.findMany({villageId, filters: {referenceYear, sourceId, isEstimate, isPreferred, needsReview, verificationStatus}, sort: {field: query.sort ?? 'referenceYear', order: query.order ?? 'desc'}, skip: pagination.skip, take: pagination.take});
   if (result.items.length === 0) await this.villages.ensureExists(villageId);
   return {items: result.items, meta: buildPaginationMeta(result.total, pagination)};
