@@ -41,3 +41,12 @@ describe('change request rejection',()=>{
  it('permits historical and stale proposals without Population or Sources access',async()=>{row.entityId='dddddddd-dddd-4ddd-8ddd-dddddddddddd';row.baseVersion=2147483647;expect((await post({reviewComment:'x'},'REVIEWER')).status).toBe(200);expect(db.lock).toHaveBeenCalledOnce();expect((db.lock.mock.calls[0]![0] as TemplateStringsArray).join('')).toContain('change_requests');});
  it('propagates audit failures and unexpected database errors',async()=>{db.audit.mockRejectedValueOnce(new Error('audit failure'));expect((await post({reviewComment:'x'},'ADMIN')).status).toBe(500);db.update.mockRejectedValueOnce(new Error('database failure'));expect((await post({reviewComment:'x'},'ADMIN')).status).toBe(500);expect(db.audit).toHaveBeenCalledTimes(1);});
 });
+
+describe('owner withdrawal',()=>{
+ const withdraw=(role='EDITOR',subject=actor,body:object={})=>request(app).post(`/api/v1/change-requests/${id}/withdraw`).set('X-Request-Id',requestId).set('Authorization',`Bearer ${jwt.sign({role},secret,{subject})}`).send(body);
+ it('withdraws an owned pending request once and audits its distinct meaning',async()=>{const r=await withdraw();expect(r.status).toBe(200);expect(r.body.data).toMatchObject({status:'REJECTED',reviewedById:actor,reviewComment:'Withdrawn by requester'});expect(db.audit).toHaveBeenCalledOnce();expect(db.audit.mock.calls[0]![0].data).toMatchObject({action:'REJECT',actorId:actor,after:{withdrawn:true,status:'REJECTED'}});});
+ it('hides another owner request, including terminal status',async()=>{row.requestedById='dddddddd-dddd-4ddd-8ddd-dddddddddddd';row.status='APPROVED';expect((await withdraw()).status).toBe(404);expect(db.update).not.toHaveBeenCalled();});
+ it.each(['REVIEWER','ADMIN'])('denies %s the owner operation',async role=>{expect((await withdraw(role)).status).toBe(403);expect(db.lock).not.toHaveBeenCalled();});
+ it.each(['APPROVED','REJECTED'] as const)('rejects duplicate transition from %s',async status=>{row.status=status;expect((await withdraw()).status).toBe(409);expect(db.update).not.toHaveBeenCalled();});
+ it('rejects unexpected body and propagates audit failure',async()=>{expect((await withdraw('EDITOR',actor,{reason:'x'})).status).toBe(400);db.audit.mockRejectedValueOnce(new Error('audit failure'));expect((await withdraw()).status).toBe(500);});
+});

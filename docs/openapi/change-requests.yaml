@@ -95,10 +95,10 @@ paths:
         REVIEWER or ADMIN only; the requester cannot approve their own request.
         The stored proposal and baseVersion are applied to an active VERIFIED
         Population record. A stale or otherwise ineligible proposal returns 409
-        and remains pending. These lifecycle policies are provisional pending team
-        review: approval preserves verification status and metadata, preference,
-        and sticky needsReview; a changed population value uses the existing
-        anomaly rule. Approval does not constitute a new verification event.
+        and remains pending. Approval is a new verification: the approver and one
+        shared approval time are recorded in Population verification metadata and
+        request review metadata. needsReview becomes false. Preference is cleared
+        only when referenceYear changes, without selecting a replacement.
         The Population update, request approval and their audit records are atomic.
         Review checks pending status before self-approval; a stale target version
         takes precedence over an unavailable replacement source.
@@ -132,6 +132,49 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/Error' }
         '409': { $ref: '#/components/responses/PopulationVersionConflict' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/Error' }
+  /api/v1/change-requests/{id}/withdraw:
+    post:
+      summary: Withdraw an owned pending request
+      operationId: withdrawChangeRequest
+      description: >-
+        Only the requesting EDITOR may withdraw their own PENDING request. This
+        implementation uses REJECTED as the terminal status, records the owner
+        as reviewedById, records the withdrawal time in reviewedAt, and sets
+        reviewComment to Withdrawn by requester. The REJECT audit after snapshot
+        contains withdrawn=true to distinguish this operation from reviewer
+        rejection. No Population row is changed. Stale or deleted targets do
+        not prevent withdrawal. Other owners and missing requests return 404;
+        an owned terminal request returns 409. The guarded transition and audit
+        are atomic and serialize with approval and rejection.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: false }
+            example: {}
+      responses:
+        '200':
+          description: Withdrawn request, represented as REJECTED.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/ChangeRequest' }
+              example:
+                data: { id: '44444444-4444-4444-8444-444444444444', entityType: PopulationRecord, entityId: '33333333-3333-4333-8333-333333333333', baseVersion: 3, proposedChanges: { notes: Fictional revision }, reason: Fictional correction, status: REJECTED, requestedById: '11111111-1111-4111-8111-111111111111', reviewedById: '11111111-1111-4111-8111-111111111111', reviewComment: Withdrawn by requester, createdAt: '2026-01-01T10:00:00.000Z', updatedAt: '2026-01-01T11:00:00.000Z', reviewedAt: '2026-01-01T11:00:00.000Z' }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
         '413': { $ref: '#/components/responses/PayloadTooLarge' }
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/Error' }

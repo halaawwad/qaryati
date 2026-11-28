@@ -18,9 +18,9 @@ export const changeRequestsRepository = {
    throw error;
   }
  },
- async approve(id: string, actorId: string, reviewComment: string | undefined, client: Prisma.TransactionClient) {
+ async approve(id: string, actorId: string, reviewComment: string | undefined, client: Prisma.TransactionClient, reviewedAt: Date) {
   try {
-   return await client.changeRequest.update({where:{id,status:'PENDING'},data:{status:'APPROVED',reviewedById:actorId,reviewComment:reviewComment ?? null,reviewedAt:new Date()}});
+   return await client.changeRequest.update({where:{id,status:'PENDING'},data:{status:'APPROVED',reviewedById:actorId,reviewComment:reviewComment ?? null,reviewedAt}});
   } catch(error) {
    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code==='P2025') throw new ConflictError('Change request changed during review');
    throw error;

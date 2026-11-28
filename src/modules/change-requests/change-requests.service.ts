@@ -25,10 +25,22 @@ export const changeRequestsService = {
    const parsed=populationProposalSchema.safeParse(before.proposedChanges);
    if (!parsed.success) throw new ConflictError('Invalid stored population proposal');
    if (!populationParamsSchema.safeParse({id:before.entityId}).success) throw new NotFoundError('Population record not found');
-   const population=await populationService.applyApprovedChange(before.entityId,before.baseVersion,parsed.data,context.actorId,client);
-   const after=await changeRequestsRepository.approve(id,context.actorId,input.reviewComment,client);
+   const approvedAt=new Date();
+   const population=await populationService.applyApprovedChange(before.entityId,before.baseVersion,parsed.data,context.actorId,client,approvedAt);
+   const after=await changeRequestsRepository.approve(id,context.actorId,input.reviewComment,client,approvedAt);
    await recordAudit({entityType:'PopulationRecord',entityId:before.entityId,action:'UPDATE',actorId:context.actorId,requestId:context.requestId,before:population.before,after:population.after},client);
    await recordAudit({entityType:'ChangeRequest',entityId:id,action:'APPROVE',actorId:context.actorId,requestId:context.requestId,before:snapshot(before),after:snapshot(after)},client);
+   return after;
+  });
+ },
+ async withdraw(id:string, context:{actorId:string;role:Role;requestId:string}) {
+  if (context.role !== 'EDITOR') throw new ForbiddenError();
+  return changeRequestsRepository.transaction(async client=>{
+   const before=await changeRequestsRepository.lockById(id,client);
+   if (!before || before.requestedById.toLowerCase() !== context.actorId.toLowerCase()) throw new NotFoundError('Change request not found');
+   if (before.status !== 'PENDING') throw new ConflictError('Change request is not pending');
+   const after=await changeRequestsRepository.reject(id,context.actorId,'Withdrawn by requester',client);
+   await recordAudit({entityType:'ChangeRequest',entityId:id,action:'REJECT',actorId:context.actorId,requestId:context.requestId,before:snapshot(before),after:{...snapshot(after),withdrawn:true}},client);
    return after;
   });
  },

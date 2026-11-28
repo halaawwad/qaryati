@@ -249,12 +249,30 @@ describe('Change Request approval with PostgreSQL',()=>{
   const before=await db.populationRecord.findUniqueOrThrow({where:{id:f.id}}),rid=requestId();
   const res=await approve(f,first.body.data.id,rid);expect(res.status).toBe(200);expect(res.body.data).toMatchObject({status:'APPROVED',reviewedById:f.adminId,reviewComment:'accepted'});
   const after=await db.populationRecord.findUniqueOrThrow({where:{id:f.id}});
-  expect(after).toMatchObject({population:151,version:4,verificationStatus:'VERIFIED',verifiedById:before.verifiedById,verifiedAt:before.verifiedAt,isPreferred:true,needsReview:true,updatedById:f.adminId});
+  expect(after).toMatchObject({population:151,version:4,verificationStatus:'VERIFIED',verifiedById:f.adminId,verifiedAt:expect.any(Date),isPreferred:true,needsReview:false,updatedById:f.adminId});
+  const approved=await db.changeRequest.findUniqueOrThrow({where:{id:first.body.data.id}});expect(after.verifiedAt).toEqual(approved.reviewedAt);expect(after.verifiedAt).not.toEqual(before.verifiedAt);
   const audits=await db.auditLog.findMany({where:{requestId:rid},orderBy:{entityType:'asc'}});expect(audits).toHaveLength(2);
   expect(audits[0]).toMatchObject({entityType:'ChangeRequest',action:'APPROVE',actorId:f.adminId,before:{status:'PENDING'},after:{status:'APPROVED',reviewedById:f.adminId}});
-  expect(audits[1]).toMatchObject({entityType:'PopulationRecord',action:'UPDATE',actorId:f.adminId,before:{population:100,version:3},after:{population:151,version:4}});
+  expect(audits[1]).toMatchObject({entityType:'PopulationRecord',action:'UPDATE',actorId:f.adminId,before:{population:100,version:3},after:{population:151,version:4,needsReview:false,verifiedById:f.adminId,verifiedAt:approved.reviewedAt?.toISOString()}});
   const staleId=requestId();expect((await approve(f,second.body.data.id,staleId)).status).toBe(409);expect((await db.changeRequest.findUniqueOrThrow({where:{id:second.body.data.id}})).status).toBe('PENDING');expect(await db.auditLog.count({where:{requestId:staleId}})).toBe(0);
   const token=jwt.sign({role:'ADMIN'},secret,{subject:f.adminId});const historical=await request(app).get(`/api/v1/change-requests/${second.body.data.id}`).set('Authorization',`Bearer ${token}`);expect(historical.status).toBe(200);expect(historical.body.data.status).toBe('PENDING');
+ });
+ it.each([false,true])('approval clears needsReview=%s and refreshes verification metadata',async flag=>{
+  const f=await fixture();await db.populationRecord.update({where:{id:f.id},data:{needsReview:flag}});const sub=await submit(f,{population:500});const r=await approve(f,sub.body.data.id);expect(r.status).toBe(200);
+  const record=await db.populationRecord.findUniqueOrThrow({where:{id:f.id}}),change=await db.changeRequest.findUniqueOrThrow({where:{id:sub.body.data.id}});expect(record).toMatchObject({needsReview:false,verifiedById:f.adminId,verificationStatus:'VERIFIED',version:4});expect(record.verifiedAt).toEqual(change.reviewedAt);expect(record.verifiedAt).not.toEqual(new Date('2021-01-01T00:00:00Z'));
+ });
+ it.each([false,true])('year move with destination occupied=%s clears preference without replacement',async occupied=>{
+  const f=await fixture();if(occupied){const other=randomUUID();ids.records.add(other);await db.populationRecord.create({data:{id:other,villageId:f.villageId,sourceId:f.otherSourceId,referenceYear:2019,population:80,isPreferred:true,verificationStatus:'VERIFIED'}});}
+  const sub=await submit(f,{referenceYear:2019});expect(sub.status).toBe(201);const r=await approve(f,sub.body.data.id);expect(r.status).toBe(200);expect(await db.populationRecord.findUniqueOrThrow({where:{id:f.id}})).toMatchObject({referenceYear:2019,isPreferred:false,version:4});expect(await db.populationRecord.count({where:{villageId:f.villageId,referenceYear:2019,isPreferred:true}})).toBe(occupied?1:0);
+  const defaults=await population.list(f.villageId,{}),all=await population.list(f.villageId,{includeAll:true});expect(defaults.items.some(x=>x.id===f.id)).toBe(false);expect(all.items.some(x=>x.id===f.id)).toBe(true);
+ });
+ it('preserves a nonpreferred record and rejects a composite-key collision atomically',async()=>{
+  const f=await fixture();await db.populationRecord.update({where:{id:f.id},data:{isPreferred:false}});const other=randomUUID();ids.records.add(other);await db.populationRecord.create({data:{id:other,villageId:f.villageId,sourceId:f.sourceId,referenceYear:2019,population:10}});const sub=await submit(f,{referenceYear:2019});const before=await db.populationRecord.findUniqueOrThrow({where:{id:f.id}}),rid=requestId();expect((await approve(f,sub.body.data.id,rid)).status).toBe(409);expect(await db.populationRecord.findUniqueOrThrow({where:{id:f.id}})).toEqual(before);expect((await db.changeRequest.findUniqueOrThrow({where:{id:sub.body.data.id}})).status).toBe('PENDING');expect(await db.auditLog.count({where:{requestId:rid}})).toBe(0);
+  const ok=await submit(f,{notes:'changed'});expect((await approve(f,ok.body.data.id)).status).toBe(200);expect(await db.populationRecord.findUniqueOrThrow({where:{id:f.id}})).toMatchObject({isPreferred:false,version:4});
+ });
+ it('withdraws an owned stale request after its target is deleted without touching Population',async()=>{
+  const f=await fixture(),sub=await submit(f,{notes:'change'}),id=sub.body.data.id;await db.populationRecord.update({where:{id:f.id},data:{deletedAt:new Date(),version:4,isPreferred:false}});const before=await db.populationRecord.findUniqueOrThrow({where:{id:f.id}}),rid=requestId(),token=jwt.sign({role:'EDITOR'},secret,{subject:f.actorId});
+  const withdraw=()=>request(app).post(`/api/v1/change-requests/${id}/withdraw`).set('Authorization',`Bearer ${token}`).set('X-Request-Id',rid).send({});expect((await withdraw()).status).toBe(200);expect((await withdraw()).status).toBe(409);expect(await db.populationRecord.findUniqueOrThrow({where:{id:f.id}})).toEqual(before);expect(await db.auditLog.findFirstOrThrow({where:{requestId:rid}})).toMatchObject({action:'REJECT',actorId:f.actorId,after:{withdrawn:true,status:'REJECTED'}});
  });
  it.each(['PopulationRecord','ChangeRequest'] as const)('rolls back both changes and audits when the %s audit fails',async entity=>{
   const f=await fixture(),submitted=await submit(f,{notes:'changed'}),before=await db.populationRecord.findUniqueOrThrow({where:{id:f.id}}),rid=requestId();
@@ -268,6 +286,20 @@ describe('Change Request approval with PostgreSQL',()=>{
   const {changeRequestsRepository}=await import('../../src/modules/change-requests/change-requests.repository.js');vi.spyOn(changeRequestsRepository,'approve').mockRejectedValueOnce(new Error('injected guarded transition failure'));
   expect((await approve(f,submitted.body.data.id,rid)).status).toBe(500);expect(await db.populationRecord.findUniqueOrThrow({where:{id:f.id}})).toEqual(before);expect((await db.changeRequest.findUniqueOrThrow({where:{id:submitted.body.data.id}})).status).toBe('PENDING');expect(await db.auditLog.count({where:{requestId:rid}})).toBe(0);
  });
+ it('rolls back withdrawal when its audit fails',async()=>{
+  const f=await fixture(),sub=await submit(f,{notes:'changed'}),id=sub.body.data.id,rid=requestId(),token=jwt.sign({role:'EDITOR'},secret,{subject:f.actorId}),before=await db.populationRecord.findUniqueOrThrow({where:{id:f.id}});
+  const {auditRepository}=await import('../../src/modules/audit/audit.repository.js');vi.spyOn(auditRepository,'create').mockRejectedValueOnce(new Error('injected audit failure'));
+  expect((await request(app).post(`/api/v1/change-requests/${id}/withdraw`).set('Authorization',`Bearer ${token}`).set('X-Request-Id',rid).send({})).status).toBe(500);expect((await db.changeRequest.findUniqueOrThrow({where:{id}})).status).toBe('PENDING');expect(await db.populationRecord.findUniqueOrThrow({where:{id:f.id}})).toEqual(before);expect(await db.auditLog.count({where:{requestId:rid}})).toBe(0);
+ });
+ it.each(['approve','reject','withdraw'] as const)('serializes withdrawal against concurrent %s',async operation=>{
+  const f=await fixture(),sub=await submit(f,{notes:'changed'}),id=sub.body.data.id,held=gate(),locked=gate(),waiting=gate();
+  const {changeRequestsRepository}=await import('../../src/modules/change-requests/change-requests.repository.js');const original=changeRequestsRepository.lockById.bind(changeRequestsRepository);let calls=0,holder=0,waiter=0;
+  vi.spyOn(changeRequestsRepository,'lockById').mockImplementation(async(requestId,client)=>{const n=++calls,pid=(await client.$queryRaw<Array<{pid:number}>>`SELECT pg_backend_pid() AS pid`)[0]!.pid;if(n===2){waiter=pid;waiting.release();}const result=await original(requestId,client);if(n===1){holder=pid;locked.release();await deadline(held.wait);}return result;});
+  const editor=jwt.sign({role:'EDITOR'},secret,{subject:f.actorId}),admin=jwt.sign({role:'ADMIN'},secret,{subject:f.adminId}),firstId=requestId(),secondId=requestId();
+  const first=settled(Promise.resolve(request(app).post(`/api/v1/change-requests/${id}/withdraw`).set('Authorization',`Bearer ${editor}`).set('X-Request-Id',firstId).send({})));let second:typeof first|undefined;
+  try{await deadline(locked.wait);second=settled(Promise.resolve(request(app).post(`/api/v1/change-requests/${id}/${operation}`).set('Authorization',`Bearer ${operation==='withdraw'?editor:admin}`).set('X-Request-Id',secondId).send(operation==='reject'?{reviewComment:'reject'}:{})));await deadline(waiting.wait);await blockedBy(waiter,holder);}finally{held.release();await first;if(second)await second;}
+  const a=await first,b=await second!;expect(a.ok&&a.value.status).toBe(200);expect(b.ok&&b.value.status).toBe(409);expect((await db.changeRequest.findUniqueOrThrow({where:{id}})).status).toBe('REJECTED');expect(await db.auditLog.count({where:{requestId:firstId}})).toBe(1);expect(await db.auditLog.count({where:{requestId:secondId}})).toBe(0);expect(await db.populationRecord.findUniqueOrThrow({where:{id:f.id}})).toMatchObject({version:3,notes:'original'});
+ },15000);
  it('serializes two approvals on the request row',async()=>{
   const f=await fixture(),submitted=await submit(f,{notes:'changed'}),id=submitted.body.data.id;
   const {changeRequestsRepository}=await import('../../src/modules/change-requests/change-requests.repository.js');const original=changeRequestsRepository.lockById.bind(changeRequestsRepository),held=gate(),locked=gate(),waiting=gate();let calls=0,holder=0,waiter=0;
@@ -317,7 +349,7 @@ describe('Change Request approval with PostgreSQL',()=>{
   const firstId=requestId(),secondId=requestId(),context={actorId:f.adminId,role:'ADMIN' as const,requestId:firstId};
   const first=settled<unknown>(operation==='patch'?population.update(f.id,{expectedVersion:3,notes:'direct'},context):operation==='delete'?population.softDelete(f.id,context):population.review(f.id,{expectedVersion:3},operation==='verify'?'VERIFIED':'REJECTED',context));let second:ReturnType<typeof settled<Awaited<ReturnType<typeof approve>>>>|undefined;
   try{await deadline(locked.wait);second=settled(Promise.resolve(approve(f,submitted.body.data.id,secondId)));await blockedByAny(holder);}finally{held.release();await first;if(second)await second;}
-  const a=await first,b=await second!;expect(a.ok).toBe(true);expect(b.ok&&b.value.status).toBe(operation==='delete'?404:operation==='verify'?200:409);expect((await db.changeRequest.findUniqueOrThrow({where:{id:submitted.body.data.id}})).status).toBe(operation==='verify'?'APPROVED':'PENDING');expect(await db.auditLog.count({where:{requestId:secondId}})).toBe(operation==='verify'?2:0);
+  const a=await first,b=await second!;expect(a.ok).toBe(true);expect(b.ok&&b.value.status).toBe(operation==='delete'?404:409);expect((await db.changeRequest.findUniqueOrThrow({where:{id:submitted.body.data.id}})).status).toBe('PENDING');expect(await db.auditLog.count({where:{requestId:secondId}})).toBe(0);
  },15000);
  it.each([['village','approval'],['village','deletion'],['source','approval'],['source','deletion']] as const)('serializes approval and %s deletion with %s first',async(kind,firstOperation)=>{
   const f=await fixture(),submitted=await submit(f,kind==='source'?{sourceId:f.otherSourceId}:{notes:'approved'}),held=gate(),locked=gate();let holder=0;
@@ -344,9 +376,9 @@ describe('Change Request approval with PostgreSQL',()=>{
   try{await deadline(locked.wait);second=firstOperation==='approval'?selectAction():approveAction();await deadline(waiting.wait);await blockedBy(waiter,holder);}finally{held.release();await first;if(second)await second;}
   const a=await first,b=await second!;expect(a.ok).toBe(true);if(firstOperation==='approval'){expect((a as {ok:true;value:Awaited<ReturnType<typeof approve>>}).value.status).toBe(200);expect(b.ok).toBe(false);}else{expect(b.ok&&(b.value as Awaited<ReturnType<typeof approve>>).status).toBe(409);}
  },15000);
- it.each(['business key','preferred slot'] as const)('rolls back a %s uniqueness conflict',async kind=>{
+ it('rolls back a business-key uniqueness conflict',async()=>{
   const f=await fixture(),submitted=await submit(f,{referenceYear:2021}),other=randomUUID();ids.records.add(other);
-  await db.populationRecord.create({data:{id:other,villageId:f.villageId,sourceId:kind==='business key'?f.sourceId:f.otherSourceId,population:120,referenceYear:2021,verificationStatus:'VERIFIED',isPreferred:kind==='preferred slot'}});
+  await db.populationRecord.create({data:{id:other,villageId:f.villageId,sourceId:f.sourceId,population:120,referenceYear:2021,verificationStatus:'VERIFIED'}});
   const before=await db.populationRecord.findUniqueOrThrow({where:{id:f.id}}),rid=requestId();expect((await approve(f,submitted.body.data.id,rid)).status).toBe(409);expect(await db.populationRecord.findUniqueOrThrow({where:{id:f.id}})).toEqual(before);expect((await db.changeRequest.findUniqueOrThrow({where:{id:submitted.body.data.id}})).status).toBe('PENDING');expect(await db.auditLog.count({where:{requestId:rid}})).toBe(0);
  });
  it.each([[2147483646,200],[2147483647,409]] as const)('handles version %i',async(version,status)=>{

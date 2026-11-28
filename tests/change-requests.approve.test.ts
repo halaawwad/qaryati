@@ -33,7 +33,8 @@ describe('change request approval',()=>{
  it.each(['REVIEWER','ADMIN'] as const)('approves as %s with the transaction and two audits',async role=>{
   const res=await post({reviewComment:' accepted '},role);
   expect(res.status).toBe(200);expect(res.body.data).toMatchObject({id,status:'APPROVED',reviewedById:actor,reviewComment:'accepted',reviewedAt:expect.any(String)});
-  expect(apply).toHaveBeenCalledWith(row.entityId,3,{notes:'updated'},actor,tx);
+  expect(apply).toHaveBeenCalledWith(row.entityId,3,{notes:'updated'},actor,tx,expect.any(Date));
+  expect(apply.mock.calls[0]![5]).toEqual(db.update.mock.calls[0]![0].data.reviewedAt);
   expect(db.update).toHaveBeenCalledWith({where:{id,status:'PENDING'},data:{status:'APPROVED',reviewedById:actor,reviewComment:'accepted',reviewedAt:expect.any(Date)}});
   expect(db.audit).toHaveBeenCalledTimes(2);expect(db.audit.mock.calls[0]![0].data).toMatchObject({entityType:'PopulationRecord',action:'UPDATE',actorId:actor,before:{version:3},after:{version:4}});expect(db.audit.mock.calls[1]![0].data).toMatchObject({entityType:'ChangeRequest',action:'APPROVE',actorId:actor,before:{status:'PENDING'},after:{status:'APPROVED'}});
  });

@@ -25,7 +25,7 @@ function hasChanges(before: import('./population.repository.js').PopulationDetai
 }
 export class PopulationService {
  constructor(private readonly repository: PopulationRepository = populationRepository, private readonly villages: Pick<typeof villageService, 'ensureExists'> = villageService) {}
- async applyApprovedChange(id:string, baseVersion:number, proposedChanges:unknown, actorId:string, client:Prisma.TransactionClient) {
+ async applyApprovedChange(id:string, baseVersion:number, proposedChanges:unknown, actorId:string, client:Prisma.TransactionClient, approvedAt:Date) {
   const parsed=populationProposalSchema.safeParse(proposedChanges);
   if (!parsed.success) throw new ConflictError('Invalid stored population proposal');
   const changes=parsed.data;
@@ -47,12 +47,8 @@ export class PopulationService {
   if (normalized.sourceId?.toLowerCase() === current.sourceId.toLowerCase()) normalized.sourceId=current.sourceId;
   if (!hasChanges(current,normalized)) throw new ConflictError('Proposal must change at least one field');
   ensureVersionCapacity(current.version);
-  let needsReview:boolean | undefined;
-  if (normalized.population !== undefined && normalized.population !== current.population) {
-   const baseline=await this.repository.findLatestVerified(current.villageId,client,id);
-   needsReview=current.needsReview || anomalous(normalized.population,baseline);
-  }
-  await this.repository.update(id,{expectedVersion:baseVersion,...normalized},actorId,client,needsReview);
+  const yearChanged=normalized.referenceYear !== undefined && normalized.referenceYear !== current.referenceYear;
+  await this.repository.update(id,{expectedVersion:baseVersion,...normalized},actorId,client,false,yearChanged,{verifiedById:actorId,verifiedAt:approvedAt});
   const after=await this.repository.findForDelete(id,client);
   if (!after) throw new ConflictError('Population record changed during approval');
   const auditSnapshot=(record:typeof current) => ({...snapshot(record),createdById:record.createdById,updatedById:record.updatedById,verifiedById:record.verifiedById,verifiedAt:record.verifiedAt?.toISOString() ?? null});
