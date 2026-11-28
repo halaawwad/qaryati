@@ -275,7 +275,9 @@ paths:
         preferred-index or database concurrency conflicts. No selection is retried.
         An actual change returns 409 CONFLICT if either row to be changed is at
         version 2147483647; a matching no-op succeeds at that version. The global JSON parser can return
-        400 or 413 before route-level authentication. READ defaults are unchanged.
+        400 or 413 before route-level authentication. Village Population lists
+        default to preferred records; explicit isPreferred selects either flag,
+        and includeAll=true returns both but cannot be combined with isPreferred.
       security:
         - bearerAuth: []
       parameters:

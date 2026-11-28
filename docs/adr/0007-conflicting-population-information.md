@@ -26,8 +26,9 @@ silently overwrite a review, and changes must be traceable.
 
 ## Decision
 
-The following describes the existing model and implementation; branch-only
-behavior remains provisional pending review and merge.
+The following describes the existing model and implementation. Confirmed team
+policies are identified below; branch-only implementation remains subject to
+review and merge.
 
 ### Sourced records and review (merged, with final-review corrections on this branch)
 
@@ -68,7 +69,7 @@ behavior remains provisional pending review and merge.
 
 ### Preferred selection and reads
 
-The preferred-selection branch lets a reviewer or administrator explicitly
+Preferred selection lets a reviewer or administrator explicitly
 select a verified record. The request supplies the target's expected version
 and the expected identity and version of the current preferred record, or null
 for an empty slot. A successful change demotes the previous record if present,
@@ -108,8 +109,8 @@ actual year change clears preference without replacement. Self-approval is
 prohibited for all roles. Stale or exhausted versions conflict; other pending
 proposals are not automatically superseded.
 
-As an implementation choice, an EDITOR may withdraw their own pending request
-through the owner-only withdrawal endpoint. Withdrawal stores REJECTED with the
+The confirmed policy permits an EDITOR to withdraw their own pending request.
+As an implementation choice, the owner-only endpoint stores REJECTED with the
 owner and time in review metadata and the comment Withdrawn by requester. Its
 REJECT audit after snapshot includes withdrawn=true, distinguishing it from
 reviewer rejection. A locked guarded transition and audit share a transaction;
@@ -140,7 +141,7 @@ its request or error details are identical to the Village API. Stale writes
 receive HTTP 409, and clients must reload and decide how to proceed. Database
 unique constraints provide the final guard against duplicate business keys.
 
-On the preferred-selection branch, a transaction-scoped advisory lock
+A transaction-scoped advisory lock
 serializes selection for a village/year, and affected rows are locked in
 deterministic ID order. The target and prior slot are checked against expected
 versions. The database partial unique index is the final preferred-slot guard,
@@ -148,8 +149,8 @@ including against writers that do not take that advisory lock. A concurrent
 change or uniqueness conflict can result in HTTP 409.
 
 Population mutation and audit writes share a transaction; if an audit write
-fails, the mutation rolls back. The same pattern is implemented for branch-only
-selection and Change Request submission and rejection. A checked no-op produces
+fails, the mutation rolls back. The same pattern applies to preferred selection
+and Change Request submission, approval, rejection and withdrawal. A checked no-op produces
 neither a mutation nor an audit row. Audit rows are append-only by application
 convention; database immutability is not enforced.
 
@@ -183,14 +184,14 @@ the check; the flag must not be treated as a globally current comparison.
   [ADR-0002: technology stack](0002-technology-stack.md),
   [ADR-0003: modular monolith](0003-modular-monolith.md), and
   [ADR-0005: optimistic locking and audit](0005-optimistic-locking-and-audit.md).
-- Main: [Prisma schema](../../prisma/schema.prisma),
+- Current tree: [Prisma schema](../../prisma/schema.prisma),
   [initial migration and indexes](../../prisma/migrations/20261010162836_init/migration.sql),
   [Population OpenAPI](../openapi/population.yaml),
   [Sources OpenAPI](../openapi/sources.yaml),
   [Population service](../../src/modules/population/population.service.ts),
   [repository](../../src/modules/population/population.repository.ts), and
   [Population review PostgreSQL tests](../../tests/integration/population.review.postgres.integration.ts).
-- Unmerged commit `c2c2929`: [preferred selection service](https://github.com/halaawwad/qaryati/blob/c2c2929eaf8cc761d21fee525c139b3f2b924904/src/modules/population/population.service.ts),
+- Merged preferred-selection commit `c2c2929`: [preferred selection service](https://github.com/halaawwad/qaryati/blob/c2c2929eaf8cc761d21fee525c139b3f2b924904/src/modules/population/population.service.ts),
   [repository and locks](https://github.com/halaawwad/qaryati/blob/c2c2929eaf8cc761d21fee525c139b3f2b924904/src/modules/population/population.repository.ts),
   and [PostgreSQL tests](https://github.com/halaawwad/qaryati/blob/c2c2929eaf8cc761d21fee525c139b3f2b924904/tests/integration/population.preferred.postgres.integration.ts).
 - Unmerged commit `2306314`: [preferred reads OpenAPI](https://github.com/halaawwad/qaryati/blob/23063148effd6555d016aca5a84ad8e84fc6da48/docs/openapi/population.yaml)
