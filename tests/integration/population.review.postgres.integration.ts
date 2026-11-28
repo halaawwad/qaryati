@@ -216,17 +216,23 @@ describe('Population review with PostgreSQL',()=>{
    const before=await db.populationRecord.findUniqueOrThrow({where:{id:f.id}}),ctx=context(f.otherActor);
    const result=await population.review(f.id,{expectedVersion:3},target,ctx);
    const after=await db.populationRecord.findUniqueOrThrow({where:{id:f.id}});
-   if(status===target){
+   if(status===target && target==='REJECTED'){
     expect(after).toEqual(before);expect(result.version).toBe(3);expect(await audits(f.id)).toHaveLength(0);
     await expect(population.review(f.id,{expectedVersion:2},target,context(f.actorId))).rejects.toMatchObject({code:'CONFLICT'});
     expect(await db.populationRecord.findUniqueOrThrow({where:{id:f.id}})).toEqual(before);expect(await audits(f.id)).toHaveLength(0);
    } else {
-    expect(after).toEqual({...before,verificationStatus:target,version:4,verifiedById:target==='VERIFIED'?f.otherActor:null,verifiedAt:target==='VERIFIED'?expect.any(Date):null,updatedById:f.otherActor,updatedAt:expect.any(Date),isPreferred:target==='REJECTED'?false:before.isPreferred});
-    expect(await audits(f.id)).toMatchObject([{entityType:'PopulationRecord',action:target==='VERIFIED'?'VERIFY':'REJECT',actorId:f.otherActor,requestId:ctx.requestId,before:{verificationStatus:status,version:3,needsReview:true,isPreferred:true},after:{verificationStatus:target,version:4,needsReview:true,isPreferred:target==='REJECTED'?false:true,verifiedById:target==='VERIFIED'?f.otherActor:null}}]);
+    expect(after).toEqual({...before,verificationStatus:target,version:4,verifiedById:target==='VERIFIED'?f.otherActor:null,verifiedAt:target==='VERIFIED'?expect.any(Date):null,updatedById:f.otherActor,updatedAt:expect.any(Date),needsReview:target==='VERIFIED'?false:before.needsReview,isPreferred:target==='REJECTED'?false:before.isPreferred});
+    expect(await audits(f.id)).toMatchObject([{entityType:'PopulationRecord',action:target==='VERIFIED'?'VERIFY':'REJECT',actorId:f.otherActor,requestId:ctx.requestId,before:{verificationStatus:status,version:3,needsReview:true,isPreferred:true},after:{verificationStatus:target,version:4,needsReview:target==='VERIFIED'?false:true,isPreferred:target==='REJECTED'?false:true,verifiedById:target==='VERIFIED'?f.otherActor:null}}]);
     expect(await db.populationRecord.findUniqueOrThrow({where:{id:f.otherId}})).toMatchObject({isPreferred:false});
    }
   })();
  });
+ it('treats same-status verification as a mutation only when review is outstanding',safeTest(async()=>{
+  const f=await fixture();await db.populationRecord.update({where:{id:f.id},data:{verificationStatus:'VERIFIED',version:2147483647}});const ctx=context(f.otherActor);
+  await expect(population.review(f.id,{expectedVersion:2147483647},'VERIFIED',ctx)).rejects.toMatchObject({code:'CONFLICT'});
+  expect(await audits(f.id)).toHaveLength(0);expect(await db.populationRecord.findUniqueOrThrow({where:{id:f.id}})).toMatchObject({needsReview:true,version:2147483647});
+  await db.populationRecord.update({where:{id:f.id},data:{needsReview:false}});await population.review(f.id,{expectedVersion:2147483647},'VERIFIED',ctx);expect(await audits(f.id)).toHaveLength(0);
+ }));
  it.each(['VERIFIED','REJECTED'] as const)('rolls back %s on a real audit foreign-key failure',async target=>{
   await safeTest(async()=>{
    const f=await fixture();

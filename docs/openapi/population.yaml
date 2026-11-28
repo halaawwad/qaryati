@@ -128,7 +128,7 @@ paths:
                   meta: { $ref: '#/components/schemas/PaginationMeta' }
               example:
                 data:
-                  - { id: '33333333-3333-4333-8333-333333333333', villageId: '22222222-2222-4222-8222-222222222222', population: 1000, referenceYear: 2020, referenceDate: null, sourceId: '11111111-1111-4111-8111-111111111111', isEstimate: true, isPreferred: true, needsReview: false, notes: Fictional example, verificationStatus: PENDING, version: 1, createdAt: '2026-01-01T10:00:00.000Z', updatedAt: '2026-01-01T10:00:00.000Z' }
+                  - { id: '33333333-3333-4333-8333-333333333333', villageId: '22222222-2222-4222-8222-222222222222', population: 1000, referenceYear: 2020, referenceDate: null, sourceId: '11111111-1111-4111-8111-111111111111', isEstimate: true, isPreferred: true, needsReview: false, notes: Fictional example, verificationStatus: VERIFIED, version: 1, createdAt: '2026-01-01T10:00:00.000Z', updatedAt: '2026-01-01T10:00:00.000Z' }
                 meta: { page: 1, limit: 20, total: 1, totalPages: 1, hasNextPage: false, hasPrevPage: false }
         '400': { $ref: '#/components/responses/ValidationError' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -187,7 +187,7 @@ paths:
       summary: Update a population record
       description: >-
         EDITOR may edit their own PENDING records; REVIEWER and ADMIN may edit
-        PENDING or VERIFIED records. VERIFIED status is preserved. Direct edits to
+        PENDING or VERIFIED records. VERIFIED status and verification metadata are preserved. An actual referenceYear change clears isPreferred atomically without selecting a replacement; other edits and an unchanged year preserve it. Direct edits to
         REJECTED records are provisionally prohibited. An unchanged deleted source may be retained; a replacement source
         must be active. Record authorization is checked before a missing or deleted
         replacement source is reported. Matching no-ops do not increment version or create an audit.
@@ -313,17 +313,16 @@ paths:
       description: &reviewDescription >-
         REVIEWER or ADMIN only. The body must contain only expectedVersion.
         PENDING and REJECTED can transition to VERIFIED; PENDING and VERIFIED
-        can transition to REJECTED. Repeating the current status with a matching
-        version is a no-op with no update or audit; a stale version returns 409
-        even for a no-op. A transition increments version once and is audited
-        atomically. Verification sets verifiedById and verifiedAt and preserves
-        isPreferred. Rejection clears those verification fields and isPreferred
-        without selecting a replacement. Preserving needsReview and clearing
-        preferred on rejection are Population module policies; these are not
-        explicit team-guide rules. An active village is required; a deleted source
+        can transition to REJECTED. VERIFY clears needsReview, sets verifiedById
+        and verifiedAt, and preserves isPreferred. VERIFY of an already VERIFIED
+        record with needsReview=true refreshes verification metadata, increments
+        version once and writes an audit; when false it is a no-op. REJECT preserves
+        needsReview, clears verification metadata and isPreferred, and selects no
+        replacement. Repeated REJECT is a no-op. A stale version returns 409 even
+        for a no-op. Mutations and audits are atomic. An active village is required; a deleted source
         is permitted. Authentication and role checks precede route validation;
         the global JSON parser may return 400 or 413 before authentication.
-        A transition at version 2147483647 returns 409 CONFLICT; a matching
+        A mutation at version 2147483647 returns 409 CONFLICT; a matching
         same-status no-op succeeds at that version.
       security:
         - bearerAuth: []

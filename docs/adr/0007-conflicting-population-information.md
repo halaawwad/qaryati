@@ -31,7 +31,7 @@ silently overwrite a review, and changes must be traceable.
 The following describes the existing model and implementation; branch-only
 behavior remains provisional pending review and merge.
 
-### Sourced records and review (merged)
+### Sourced records and review (merged, with final-review corrections on this branch)
 
 - Population records require a source and belong to a village. A composite
   unique key on village, reference year and source allows multiple sources for
@@ -44,13 +44,16 @@ behavior remains provisional pending review and merge.
 - New records are `PENDING`, version 1 and not preferred. Editors may directly
   edit their own pending records; reviewers and administrators may edit pending
   or verified records. Direct editing of rejected records is denied. Currently
-  editing a verified record preserves its status, verification metadata and
-  preferred flag. Whether this is the intended policy remains open.
+  editing a verified record preserves its status and verification metadata. This
+  intentionally differs from ADR-0005: reset to PENDING applies to Villages;
+  authorized direct Population and Sources edits preserve VERIFIED. A Population
+  reference-year change clears preference without replacement; other edits preserve it.
 - Reviewers and administrators can verify or reject a record. A status change
   increments its version; verification records the reviewer and time, while
-  rejection clears that metadata and the preferred flag. Repeating the current
-  status with the correct version is a no-op. Both actions preserve
-  `needsReview` today.
+  rejection clears that metadata and the preferred flag without replacement.
+  VERIFY clears `needsReview`; verifying an already VERIFIED record with the flag
+  set refreshes metadata, increments version and audits. If the flag is clear it
+  is a no-op. REJECT preserves `needsReview`; repeated rejection is a no-op.
 - On creation and a changed population value, anomaly detection compares the
   value with the non-deleted verified record for the village with the greatest
   reference year, breaking ties by ID. An update excludes the record being
@@ -100,12 +103,15 @@ request with a comment; rejection records the reviewer and time, is audited
 atomically and does not modify Population. Even a stale request or one whose
 target was deleted can be rejected.
 
-Approval is proposed, not implemented or accepted. Its intended workflow is to
+Approval is future work for the Change Requests branch, not implemented by this
+branch. The confirmed policy requires approval to constitute a new verification:
+record the approver and time in Population verification metadata, the Change
+Request and audit; clear `needsReview`. Self-approval is prohibited, while
+self-rejection and withdrawal are permitted. Its intended workflow is to
 apply the Population changes, transition the Change Request and write the
 associated audit records atomically, so failure rolls back the whole operation.
-A stale proposal must not silently overwrite newer data. Eligibility, conflict
-handling, verification and preferred-status effects require team decisions
-before an approval contract can be finalized.
+A stale proposal must not silently overwrite newer data. Other eligibility, conflict handling and preferred-slot details remain to be
+resolved in that branch.
 
 ## Alternatives considered
 
@@ -165,19 +171,11 @@ the check; the flag must not be treated as a globally current comparison.
 
 ## Outstanding decisions
 
-- Should editing a `VERIFIED` record return it to `PENDING`?
-- Should editing clear verification metadata? Should it clear preferred status?
-- Is `needsReview` a historical anomaly flag or an outstanding review obligation?
-  Should verification or rejection clear it?
-- Does Change Request approval itself constitute verification?
-- Does ADR-0005's rule that an edit returns a record to `PENDING` apply to
-  Population and Sources, or only to Villages? Current Population and Source
-  edits preserve verification status, so this scope needs clarification.
-- Who may approve a request, including self-review, and which target statuses
-  are eligible? How should approval handle a stale base version, deleted or
+- Which target statuses are eligible for Change Request approval? How should
+  approval handle a stale base version, deleted or
   changed target or source, duplicate key, changed preferred slot, concurrent
-  approval or rejection, and version exhaustion? What are the resulting
-  verification, preferred and audit semantics?
+  approval or rejection, and version exhaustion? What are the remaining
+  preferred-slot and audit details?
 
 ## References
 
