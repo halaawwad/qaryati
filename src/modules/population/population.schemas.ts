@@ -22,6 +22,14 @@ export const updatePopulationSchema = z.strictObject({
  notes: createPopulationSchema.shape.notes,
 }).refine(({expectedVersion: _version, ...changes}) => Object.values(changes).some(value => value !== undefined), {message: 'At least one editable field is required'});
 export type UpdatePopulationInput = z.infer<typeof updatePopulationSchema>;
+export const populationProposalSchema = z.strictObject({
+ population: updatePopulationSchema.shape.population,
+ referenceYear: updatePopulationSchema.shape.referenceYear,
+ referenceDate: updatePopulationSchema.shape.referenceDate,
+ sourceId: updatePopulationSchema.shape.sourceId.unwrap().transform(value => value.toLowerCase()).optional(),
+ isEstimate: updatePopulationSchema.shape.isEstimate,
+ notes: updatePopulationSchema.shape.notes,
+}).refine(changes => Object.values(changes).some(value => value !== undefined), {message:'At least one editable field is required'});
 export const reviewPopulationSchema = z.strictObject({expectedVersion: z.number().int().positive().max(2147483647)});
 export type ReviewPopulationInput = z.infer<typeof reviewPopulationSchema>;
 const preferredVersion = z.number().int().positive().max(2147483647);
@@ -34,9 +42,10 @@ const bool = z.enum(['true', 'false']).transform(value => value === 'true');
 const year = z.union([z.string().trim().min(1), z.number()]).transform(Number).pipe(z.number().int().min(-2147483648).max(2147483647));
 export const listPopulationQuerySchema = z.object({
  page: z.coerce.number().int().positive().optional(), limit: z.coerce.number().int().positive().optional(),
- referenceYear: year.optional(), sourceId: z.uuid().optional(), isEstimate: bool.optional(), isPreferred: bool.optional(), needsReview: bool.optional(),
+ referenceYear: year.optional(), sourceId: z.uuid().optional(), isEstimate: bool.optional(), isPreferred: bool.optional(), includeAll: bool.optional(), needsReview: bool.optional(),
  verificationStatus: z.enum(VerificationStatus).optional(), sort: z.enum(['referenceYear', 'population', 'createdAt', 'updatedAt']).optional(), order: z.enum(['asc', 'desc']).optional(),
-}).refine(q => { const {skip} = parsePagination(q); return Number.isSafeInteger(skip) && skip <= 2147483647; }, {path: ['page'], message: 'Pagination offset must not exceed 2147483647'});
+}).refine(q => { const {skip} = parsePagination(q); return Number.isSafeInteger(skip) && skip <= 2147483647; }, {path: ['page'], message: 'Pagination offset must not exceed 2147483647'})
+ .refine(q => !q.includeAll || q.isPreferred === undefined, {path: ['includeAll'], message: 'includeAll=true cannot be combined with isPreferred'});
 export type VillagePopulationParams = z.infer<typeof villagePopulationParamsSchema>;
 export type PopulationParams = z.infer<typeof populationParamsSchema>;
 export type ListPopulationQuery = z.infer<typeof listPopulationQuerySchema>;

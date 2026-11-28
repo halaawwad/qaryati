@@ -1,0 +1,13 @@
+import { Router } from 'express';
+import { authenticate } from '../../shared/middlewares/authenticate.js';
+import { requireRole } from '../../shared/middlewares/requireRole.js';
+import { validate } from '../../shared/middlewares/validate.js';
+import { submit, list, getById, reject, approve, withdraw } from './change-requests.controller.js';
+import { submitChangeRequestSchema, listChangeRequestsSchema, changeRequestParamsSchema, rejectChangeRequestSchema, approveChangeRequestSchema, withdrawChangeRequestSchema } from './change-requests.schemas.js';
+export const changeRequestsRouter=Router();
+changeRequestsRouter.post('/',authenticate,requireRole('EDITOR'),validate({body:submitChangeRequestSchema}),submit);
+changeRequestsRouter.get('/',authenticate,requireRole('EDITOR','REVIEWER','ADMIN'),validate({query:listChangeRequestsSchema}),list);
+changeRequestsRouter.get('/:id',authenticate,requireRole('EDITOR','REVIEWER','ADMIN'),validate({params:changeRequestParamsSchema}),getById);
+changeRequestsRouter.post('/:id/reject',authenticate,requireRole('REVIEWER','ADMIN'),validate({params:changeRequestParamsSchema,body:rejectChangeRequestSchema}),reject);
+changeRequestsRouter.post('/:id/withdraw',authenticate,requireRole('EDITOR'),validate({params:changeRequestParamsSchema,body:withdrawChangeRequestSchema}),withdraw);
+changeRequestsRouter.post('/:id/approve',authenticate,requireRole('REVIEWER','ADMIN'),validate({params:changeRequestParamsSchema,body:approveChangeRequestSchema}),approve);
