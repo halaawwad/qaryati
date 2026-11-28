@@ -135,7 +135,7 @@ export class PopulationService {
     const {createdById: _createdById, updatedById: _updatedById, verifiedById: _verifiedById, verifiedAt: _verifiedAt, ...details} = item;
     return details;
    };
-   if (current.verificationStatus === target) return publicRecord(current);
+   if (current.verificationStatus === target && (target !== 'VERIFIED' || !current.needsReview)) return publicRecord(current);
    ensureVersionCapacity(current.version);
    const item = await this.repository.review(id, input.expectedVersion, current.verificationStatus, target, context.actorId, client);
    const auditSnapshot = (record: typeof current) => ({...snapshot(record), createdById:record.createdById, updatedById:record.updatedById, verifiedById:record.verifiedById, verifiedAt:record.verifiedAt?.toISOString() ?? null});
@@ -186,7 +186,8 @@ export class PopulationService {
     const baseline = await this.repository.findLatestVerified(current.villageId, client, id);
     needsReview = current.needsReview || anomalous(input.population, baseline);
    }
-   const item = await this.repository.update(id, input, context.actorId, client, needsReview);
+   const yearChanged = input.referenceYear !== undefined && input.referenceYear !== current.referenceYear;
+   const item = await this.repository.update(id, input, context.actorId, client, needsReview, yearChanged);
    await recordAudit({entityType:'PopulationRecord', entityId:id, action:'UPDATE', actorId:context.actorId, requestId:context.requestId, before:snapshot(before), after:snapshot(item)}, client);
    return item;
   });

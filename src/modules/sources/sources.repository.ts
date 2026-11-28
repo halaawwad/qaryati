@@ -80,6 +80,7 @@ export const sourceRepository: SourceRepository = {
       const current = await tx.source.findFirst({ where: { id, deletedAt: null }, select });
       if (!current) throw new NotFoundError('Source not found');
       if (current.version !== input.expectedVersion) throw new ConflictError('Source version conflict');
+      if (current.version >= 2147483647) throw new ConflictError('Source version exhausted');
 
       const deletedAt = new Date();
       let deleted: SourceDetails & { deletedAt: Date | null };
@@ -129,6 +130,7 @@ export const sourceRepository: SourceRepository = {
       // Do not expose the creator ID selected solely for authorization.
       const { createdById: _createdById, ...before } = current;
       if (!changed) return before;
+      if (current.version >= 2147483647) throw new ConflictError('Source version exhausted');
 
       let updated: SourceDetails;
       try {
@@ -174,7 +176,7 @@ export const sourceRepository: SourceRepository = {
         after: {
           id: source.id, title: source.title, sourceType: source.sourceType,
           author: source.author, publisher: source.publisher, year: source.year,
-          url: source.url, citationText: source.citationText,
+          url: auditUrl(source.url), citationText: source.citationText,
           verificationStatus: source.verificationStatus, version: source.version,
         },
       }, tx);

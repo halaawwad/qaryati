@@ -37,7 +37,7 @@ describe('population review',()=>{
   row.version=2147483647;
   const stale=await review(action,{expectedVersion:2147483646},'ADMIN'); expect(stale.status).toBe(409); expect(stale.body.error.message).toBe('Population record version conflict');
   const exhausted=await review(action,{expectedVersion:2147483647},'ADMIN'); expect(exhausted.status).toBe(409); expect(exhausted.body.error.code).toBe('CONFLICT');
-  row.verificationStatus=action==='verify'?'VERIFIED':'REJECTED';
+  row.verificationStatus=action==='verify'?'VERIFIED':'REJECTED'; row.needsReview=false;
   expect((await review(action,{expectedVersion:2147483647},'ADMIN')).status).toBe(200);
   expect(db.update).not.toHaveBeenCalled(); expect(db.audit).not.toHaveBeenCalled();
  });
@@ -59,20 +59,20 @@ describe('population review',()=>{
   expect(db.find).not.toHaveBeenCalled(); expect(db.audit).not.toHaveBeenCalled();
  });
  it.each([
-  ['PENDING','verify','VERIFIED',true],['VERIFIED','verify','VERIFIED',false],['REJECTED','verify','VERIFIED',true],
+  ['PENDING','verify','VERIFIED',true],['VERIFIED','verify','VERIFIED',true],['REJECTED','verify','VERIFIED',true],
   ['PENDING','reject','REJECTED',true],['VERIFIED','reject','REJECTED',true],['REJECTED','reject','REJECTED',false],
  ] as const)('%s + %s yields %s (change: %s)',async (status,action,target,changed)=>{
   row.verificationStatus=status;
   row.verifiedById=actor; row.verifiedAt=now;
   const result=await review(action,{expectedVersion:2},'REVIEWER');
-  expect(result.status).toBe(200); expect(result.body.data).toMatchObject({id,verificationStatus:target,version:changed?3:2,needsReview:true,isPreferred:changed && action==='reject'?false:true,sourceId,villageId,population:100,referenceYear:2021,notes:'original'});
+  expect(result.status).toBe(200); expect(result.body.data).toMatchObject({id,verificationStatus:target,version:changed?3:2,needsReview:action==='verify'?false:true,isPreferred:changed && action==='reject'?false:true,sourceId,villageId,population:100,referenceYear:2021,notes:'original'});
   for(const field of ['createdById','updatedById','verifiedById','verifiedAt','deletedAt']) expect(result.body.data).not.toHaveProperty(field);
   if(!changed){expect(db.update).not.toHaveBeenCalled();expect(db.audit).not.toHaveBeenCalled();return;}
   expect(db.update).toHaveBeenCalledOnce(); expect(db.audit).toHaveBeenCalledOnce();
   const write=db.update.mock.calls[0]![0];
   expect(write.where).toEqual({id,deletedAt:null,version:2,verificationStatus:status});
-  expect(write.data).toEqual({verificationStatus:target,updatedById:actor,version:{increment:1},verifiedById:action==='verify'?actor:null,verifiedAt:action==='verify'?expect.any(Date):null,...(action==='reject'?{isPreferred:false}:{})});
-  expect(db.audit.mock.calls[0]![0].data).toMatchObject({entityType:'PopulationRecord',entityId:id,action:action==='verify'?'VERIFY':'REJECT',actorId:actor,requestId:'review-test',before:{verificationStatus:status,version:2,verifiedById:actor,verifiedAt:now.toISOString(),isPreferred:true,needsReview:true,notes:'original',createdById:'another-creator'},after:{verificationStatus:target,version:3,verifiedById:action==='verify'?actor:null,verifiedAt:action==='verify'?expect.any(String):null,isPreferred:action==='reject'?false:true,needsReview:true,notes:'original',createdById:'another-creator',updatedById:actor}});
+  expect(write.data).toEqual({verificationStatus:target,updatedById:actor,version:{increment:1},verifiedById:action==='verify'?actor:null,verifiedAt:action==='verify'?expect.any(Date):null,...(action==='reject'?{isPreferred:false}:{needsReview:false})});
+  expect(db.audit.mock.calls[0]![0].data).toMatchObject({entityType:'PopulationRecord',entityId:id,action:action==='verify'?'VERIFY':'REJECT',actorId:actor,requestId:'review-test',before:{verificationStatus:status,version:2,verifiedById:actor,verifiedAt:now.toISOString(),isPreferred:true,needsReview:true,notes:'original',createdById:'another-creator'},after:{verificationStatus:target,version:3,verifiedById:action==='verify'?actor:null,verifiedAt:action==='verify'?expect.any(String):null,isPreferred:action==='reject'?false:true,needsReview:action==='verify'?false:true,notes:'original',createdById:'another-creator',updatedById:actor}});
  });
  it.each(['verify','reject'] as const)('permits ADMIN to %s without checking source or ownership',async action=>{
   const response=await review(action,{expectedVersion:2},'ADMIN');
@@ -93,7 +93,7 @@ describe('population review',()=>{
  it('returns a no-op when only the locked status already matches',async()=>{
   row.verificationStatus='PENDING';
   const {deletedAt:_deletedAt,...locked}=row;
-  db.locked.mockResolvedValueOnce({...locked,verificationStatus:'VERIFIED'});
+  db.locked.mockResolvedValueOnce({...locked,verificationStatus:'VERIFIED',needsReview:false});
   const response=await review('verify',{expectedVersion:2},'REVIEWER');
   expect(response.status).toBe(200);
   expect(response.body.data).toMatchObject({verificationStatus:'VERIFIED',version:2});
@@ -115,8 +115,10 @@ describe('population review',()=>{
   const {reviewPopulationSchema}=await import('../src/modules/population/population.schemas.js');
   expect(reviewPopulationSchema.safeParse({expectedVersion:version}).success).toBe(valid);
  });
+ it('rejects clearing needsReview at maximum version without mutation',async()=>{ row.version=2147483647; row.verificationStatus='VERIFIED'; expect((await review('verify',{expectedVersion:2147483647},'ADMIN')).status).toBe(409); expect(db.update).not.toHaveBeenCalled(); expect(db.audit).not.toHaveBeenCalled(); });
+ it.each([true,false])('reject preserves needsReview=%s',async flag=>{row.needsReview=flag; const response=await review('reject',{expectedVersion:2},'ADMIN'); expect(response.body.data.needsReview).toBe(flag); expect(db.audit.mock.calls[0][0].data.after.needsReview).toBe(flag);});
  it('returns a matching maximum-version same-status request without increment or audit',async()=>{
-  row.version=2147483647; row.verificationStatus='VERIFIED';
+  row.version=2147483647; row.verificationStatus='VERIFIED'; row.needsReview=false;
   const response=await review('verify',{expectedVersion:2147483647},'REVIEWER');
   expect(response.status).toBe(200); expect(response.body.data.version).toBe(2147483647);
   expect(db.update).not.toHaveBeenCalled(); expect(db.audit).not.toHaveBeenCalled();

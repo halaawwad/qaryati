@@ -15,6 +15,12 @@ const item: HeritageDetails = {
 
 describe('HeritageService', () => {
   const repo = {
+    transaction: vi.fn<HeritageRepository['transaction']>(),
+    create: vi.fn<HeritageRepository['create']>(),
+    findForWrite: vi.fn<HeritageRepository['findForWrite']>(),
+    lock: vi.fn<HeritageRepository['lock']>(),
+    updateIfVersion: vi.fn<HeritageRepository['updateIfVersion']>(),
+    softDelete: vi.fn<HeritageRepository['softDelete']>(),
     findMany: vi.fn<HeritageRepository['findMany']>(),
     findById: vi.fn<HeritageRepository['findById']>(),
   };
