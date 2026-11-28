@@ -230,7 +230,9 @@ describe('Population soft DELETE with PostgreSQL', () => {
  it('hides deleted records from actual list and detail HTTP routes', safeTest(async()=>{
   const f=await fixture(); await population.softDelete(f.id,context(f.actorId));
   const list=await request(app).get(`/api/v1/villages/${f.villageId}/population-records`);
-  expect(list.status).toBe(200); expect(list.body.data.map((item:{id:string})=>item.id)).toEqual([f.otherId]);
+   expect(list.status).toBe(200); expect(list.body.data).toEqual([]); expect(list.body.meta.total).toBe(0);
+   const all=await request(app).get(`/api/v1/villages/${f.villageId}/population-records`).query({includeAll:'true'});
+   expect(all.status).toBe(200); expect(all.body.data.map((item:{id:string})=>item.id)).toEqual([f.otherId]); expect(all.body.meta.total).toBe(1);
   expect((await request(app).get(`/api/v1/population-records/${f.id}`)).status).toBe(404);
  }));
  it('deletes a Population record whose source is already soft-deleted', safeTest(async()=>{

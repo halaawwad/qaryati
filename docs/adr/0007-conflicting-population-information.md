@@ -2,19 +2,17 @@
 
 ## Status
 
-Proposed for team review. This record describes the implementation at main
-commit `7634e03` and identifies branch-only work separately; it does not
-accept that work or settle the questions below.
+Proposed for team review. This record distinguishes the implementation at
+main commit `69e86fc` from later branch-only work; it does not accept this ADR.
 
-- **Merged:** sourced Population CRUD, verification and rejection, the preferred
-  uniqueness constraint, optimistic checks, and transactional audit.
-- **Implemented but unmerged:** preferred selection (`c2c2929`), preferred-default
-  reads (`2306314`), version exhaustion protection (`8a1331c`), and Population
+- **Merged:** sourced Population CRUD, verification and rejection, preferred
+  selection, the preferred uniqueness constraint, optimistic checks, and audit.
+- **Implemented but unmerged:** preferred-default reads (`2306314`), version
+  exhaustion protection (`8a1331c`), and Population
   Change Request submission, listing, detail and rejection (`436bc89`). These
   commits build on one another; their presence on a branch is not acceptance.
-- **Proposed, not implemented:** Change Request approval and its application of
-  Population changes.
-- **Outstanding:** the review lifecycle and approval policies listed below.
+- **Implemented on the Change Requests branch, unmerged:** approval and owner
+  withdrawal with the confirmed review lifecycle. Remaining details are below.
 
 ## Context
 
@@ -31,7 +29,7 @@ silently overwrite a review, and changes must be traceable.
 The following describes the existing model and implementation; branch-only
 behavior remains provisional pending review and merge.
 
-### Sourced records and review (merged)
+### Sourced records and review (merged, with final-review corrections on this branch)
 
 - Population records require a source and belong to a village. A composite
   unique key on village, reference year and source allows multiple sources for
@@ -44,13 +42,16 @@ behavior remains provisional pending review and merge.
 - New records are `PENDING`, version 1 and not preferred. Editors may directly
   edit their own pending records; reviewers and administrators may edit pending
   or verified records. Direct editing of rejected records is denied. Currently
-  editing a verified record preserves its status, verification metadata and
-  preferred flag. Whether this is the intended policy remains open.
+  editing a verified record preserves its status and verification metadata. This
+  intentionally differs from ADR-0005: reset to PENDING applies to Villages;
+  authorized direct Population and Sources edits preserve VERIFIED. A Population
+  reference-year change clears preference without replacement; other edits preserve it.
 - Reviewers and administrators can verify or reject a record. A status change
   increments its version; verification records the reviewer and time, while
-  rejection clears that metadata and the preferred flag. Repeating the current
-  status with the correct version is a no-op. Both actions preserve
-  `needsReview` today.
+  rejection clears that metadata and the preferred flag without replacement.
+  VERIFY clears `needsReview`; verifying an already VERIFIED record with the flag
+  set refreshes metadata, increments version and audits. If the flag is clear it
+  is a no-op. REJECT preserves `needsReview`; repeated rejection is a no-op.
 - On creation and a changed population value, anomaly detection compares the
   value with the non-deleted verified record for the village with the greatest
   reference year, breaking ties by ID. An update excludes the record being
@@ -65,7 +66,7 @@ behavior remains provisional pending review and merge.
   reservation remain, and the deletion is audited. A deleted source does not
   hide its existing Population records.
 
-### Preferred selection and reads (implemented, unmerged)
+### Preferred selection and reads
 
 The preferred-selection branch lets a reviewer or administrator explicitly
 select a verified record. The request supplies the target's expected version
@@ -88,7 +89,7 @@ at the PostgreSQL integer maximum, returning a conflict for an actual change;
 matching no-ops can still succeed. This protection is implemented on that
 branch and its descendants, not on main.
 
-### Change Requests (implemented, unmerged; approval proposed)
+### Change Requests (implemented on this branch, unmerged)
 
 On the Change Requests branch an editor can submit a proposed Population edit
 against a verified record at a matching `baseVersion`. The proposal must make
@@ -100,12 +101,20 @@ request with a comment; rejection records the reviewer and time, is audited
 atomically and does not modify Population. Even a stale request or one whose
 target was deleted can be rejected.
 
-Approval is proposed, not implemented or accepted. Its intended workflow is to
-apply the Population changes, transition the Change Request and write the
-associated audit records atomically, so failure rolls back the whole operation.
-A stale proposal must not silently overwrite newer data. Eligibility, conflict
-handling, verification and preferred-status effects require team decisions
-before an approval contract can be finalized.
+Approval applies the proposal atomically with its Population UPDATE and Change
+Request APPROVE audits. It is a new verification: the approver and a single
+approval time are recorded on both records, needsReview becomes false, and an
+actual year change clears preference without replacement. Self-approval is
+prohibited for all roles. Stale or exhausted versions conflict; other pending
+proposals are not automatically superseded.
+
+As an implementation choice, an EDITOR may withdraw their own pending request
+through the owner-only withdrawal endpoint. Withdrawal stores REJECTED with the
+owner and time in review metadata and the comment Withdrawn by requester. Its
+REJECT audit after snapshot includes withdrawn=true, distinguishing it from
+reviewer rejection. A locked guarded transition and audit share a transaction;
+the target need not be active or current. Reviewers and administrators may
+reject, including their own requests.
 
 ## Alternatives considered
 
@@ -165,19 +174,8 @@ the check; the flag must not be treated as a globally current comparison.
 
 ## Outstanding decisions
 
-- Should editing a `VERIFIED` record return it to `PENDING`?
-- Should editing clear verification metadata? Should it clear preferred status?
-- Is `needsReview` a historical anomaly flag or an outstanding review obligation?
-  Should verification or rejection clear it?
-- Does Change Request approval itself constitute verification?
-- Does ADR-0005's rule that an edit returns a record to `PENDING` apply to
-  Population and Sources, or only to Villages? Current Population and Source
-  edits preserve verification status, so this scope needs clarification.
-- Who may approve a request, including self-review, and which target statuses
-  are eligible? How should approval handle a stale base version, deleted or
-  changed target or source, duplicate key, changed preferred slot, concurrent
-  approval or rejection, and version exhaustion? What are the resulting
-  verification, preferred and audit semantics?
+- Are additional Change Request lifecycle states or policy refinements needed
+  beyond the implementation described here?
 
 ## References
 

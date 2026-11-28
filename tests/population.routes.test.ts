@@ -13,6 +13,15 @@ describe('population routes',()=>{
  it('serves public list with parsed filters',async()=>{const r=await request(app).get(list).query({referenceYear:'2021',isEstimate:'false'});expect(r.status).toBe(200);expect(r.body).toEqual({data:[{id}],meta:{total:1}});expect(service.list).toHaveBeenCalledWith(id,{referenceYear:2021,isEstimate:false});});
  it('serves public detail',async()=>{const r=await request(app).get(detail);expect(r.status).toBe(200);expect(r.body).toEqual({data:{id}});});
  it('passes false flags, source, status and sorting to the service',async()=>{const r=await request(app).get(list).query({isEstimate:'false',isPreferred:'false',needsReview:'false',sourceId:id,verificationStatus:'VERIFIED',sort:'population',order:'asc'});expect(r.status).toBe(200);expect(service.list).toHaveBeenCalledWith(id,{isEstimate:false,isPreferred:false,needsReview:false,sourceId:id,verificationStatus:'VERIFIED',sort:'population',order:'asc'});});
+ it('parses includeAll and ignores unknown query keys',async()=>{const r=await request(app).get(list).query({includeAll:'true',unknown:'x'});expect(r.status).toBe(200);expect(service.list).toHaveBeenCalledWith(id,{includeAll:true});});
+ it.each(['true','false'])('rejects includeAll=true with isPreferred=%s before service',async value=>{const r=await request(app).get(list).query({includeAll:'true',isPreferred:value});expect(r.status).toBe(400);expect(r.body.error.code).toBe('VALIDATION_ERROR');expect(service.list).not.toHaveBeenCalled();});
+ it.each(['includeAll=true&includeAll=false','includeAll=true&includeAll=true','isPreferred=true&isPreferred=false','isPreferred=false&isPreferred=false'])('rejects repeated query %s before lookup',async query=>{
+  const response=await request(app).get(`${list}?${query}`).set('X-Request-Id','repeated-query-test');
+  expect(response.status).toBe(400);
+  expect(response.body).toMatchObject({error:{code:'VALIDATION_ERROR',message:'Request validation failed',details:expect.any(Array),requestId:'repeated-query-test'}});
+  expect(response.body.error.details.length).toBeGreaterThan(0);
+  expect(service.list).not.toHaveBeenCalled();
+ });
  it('rejects offsets above the maximum',async()=>{expect((await request(app).get(list).query({page:'2147483649',limit:'1'})).status).toBe(400);expect(service.list).not.toHaveBeenCalled();});
  it.each(['/api/v1/villages/bad/population-records','/api/v1/population-records/bad',list+'?needsReview=maybe'] )('rejects invalid input %s',async path=>{expect((await request(app).get(path)).status).toBe(400);expect(service.list).not.toHaveBeenCalled();expect(service.getById).not.toHaveBeenCalled();});
  it.each([list,detail])('returns 404 %s',async path=>{service.list.mockRejectedValue(new NotFoundError());service.getById.mockRejectedValue(new NotFoundError());expect((await request(app).get(path)).status).toBe(404);});
